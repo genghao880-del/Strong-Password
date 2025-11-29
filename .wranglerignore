@@ -1,5 +1,5 @@
 node_modules/
-.git
+.git/
 .gitignore
 *.md
 deploy.sh
@@ -12,3 +12,9 @@ TESTING.md
 INITIALIZE_DATABASE.md
 INSTRUCTIONS.md
 CONTRIBUTING.md
+tsconfig.json
+package.json
+package-lock.json
+bun.lockb
+.env
+.env.local
