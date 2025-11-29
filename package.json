@@ -1,0 +1,24 @@
+{
+  "name": "passfortress",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler pages dev .",
+    "deploy": "wrangler pages deploy .",
+    "db:create": "wrangler d1 create passfortress-db",
+    "db:schema": "wrangler d1 execute passfortress-db --file=./schema.sql"
+  },
+  "dependencies": {
+    "itty-router": "^4.0.23",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240423.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "typescript": "^5.0.0",
+    "wrangler": "^3.57.0"
+  }
+}
