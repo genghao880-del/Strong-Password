@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PassFortress - Secure Password Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        html {
+            font-family: 'Inter', sans-serif;
+        }
+        body {
+            background-color: #0f172a;
+        }
+        .copy-btn {
+            transition: all 0.2s ease;
+        }
+        .copy-btn:hover {
+            transform: scale(1.1);
+        }
+        .password-item {
+            animation: slideIn 0.3s ease;
+        }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="text-gray-200">
+    <div id="app"></div>
+
+    <script>
+        const API_BASE = window.location.origin;
+
+        class PasswordManager {
+            constructor() {
+                this.passwords = [];
+                this.showPassword = false;
+                this.generatedPassword = '';
+                this.newWebsite = '';
+                this.newPassword = '';
+                this.init();
+            }
+
+            async init() {
+                await this.loadPasswords();
+                this.render();
+            }
+
+            async loadPasswords() {
+                try {
+                    const res = await fetch(`${API_BASE}/api/passwords`);
+                    if (res.ok) {
+                        this.passwords = await res.json();
+                    }
+                } catch (e) {
+                    console.error('Failed to load passwords:', e);
+                }
+            }
+
+            generatePassword() {
+                const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=[]{}|;:,.<>?';
+                let pwd = '';
+                for (let i = 0; i < 16; i++) {
+                    pwd += chars.charAt(Math.floor(Math.random() * chars.length));
+                }
+                this.generatedPassword = pwd;
+                this.render();
+            }
+
+            async savePassword() {
+                if (!this.newWebsite || !this.newPassword) {
+                    alert('Please fill in both website and password');
+                    return;
+                }
+                try {
+                    const res = await fetch(`${API_BASE}/api/passwords`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ website: this.newWebsite, password: this.newPassword })
+                    });
+                    if (res.ok) {
+                        this.newWebsite = '';
+                        this.newPassword = '';
+                        this.generatedPassword = '';
+                        await this.loadPasswords();
+                        this.render();
+                    } else {
+                        alert('Failed to save password');
+                    }
+                } catch (e) {
+                    alert('Error saving password: ' + e.message);
+                }
+            }
+
+            async deletePassword(id) {
+                if (!confirm('Delete this password?')) return;
+                try {
+                    const res = await fetch(`${API_BASE}/api/passwords/${id}`, { method: 'DELETE' });
+                    if (res.ok) {
+                        await this.loadPasswords();
+                        this.render();
+                    } else {
+                        alert('Failed to delete password');
+                    }
+                } catch (e) {
+                    alert('Error deleting password: ' + e.message);
+                }
+            }
+
+            copyToClipboard(text) {
+                navigator.clipboard.writeText(text).then(() => {
+                    alert('Copied to clipboard!');
+                });
+            }
+
+            render() {
+                const app = document.getElementById('app');
+                app.innerHTML = `
+                    <div class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-6">
+                        <div class="max-w-4xl mx-auto">
+                            <!-- Header -->
+                            <div class="text-center mb-12">
+                                <h1 class="text-5xl font-bold text-white mb-2">🔐 PassFortress</h1>
+                                <p class="text-purple-300">Secure Password Manager</p>
+                            </div>
+
+                            <!-- Generator Section -->
+                            <div class="bg-slate-800 border border-purple-500 rounded-lg p-8 mb-8 shadow-2xl">
+                                <h2 class="text-2xl font-bold text-white mb-6">Generate Strong Password</h2>
+                                <div class="space-y-4">
+                                    <button onclick="manager.generatePassword()" class="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-3 px-6 rounded-lg transition">
+                                        🎲 Generate Password
+                                    </button>
+                                    ${this.generatedPassword ? `
+                                        <div class="flex gap-2">
+                                            <input type="text" value="${this.generatedPassword}" readonly class="flex-1 bg-slate-700 text-white p-3 rounded-lg border border-purple-500" />
+                                            <button onclick="manager.copyToClipboard('${this.generatedPassword}')" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg">
+                                                📋 Copy
+                                            </button>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+
+                            <!-- Save Password Section -->
+                            <div class="bg-slate-800 border border-purple-500 rounded-lg p-8 mb-8 shadow-2xl">
+                                <h2 class="text-2xl font-bold text-white mb-6">Save Password</h2>
+                                <div class="space-y-4">
+                                    <input type="text" placeholder="Website (e.g., gmail.com)" class="w-full bg-slate-700 text-white p-3 rounded-lg border border-purple-500 focus:outline-none focus:border-pink-500" id="website" />
+                                    <input type="text" placeholder="Password" class="w-full bg-slate-700 text-white p-3 rounded-lg border border-purple-500 focus:outline-none focus:border-pink-500" id="password" />
+                                    <button onclick="manager.savePassword()" class="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition">
+                                        ✅ Save Password
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Passwords List -->
+                            <div class="bg-slate-800 border border-purple-500 rounded-lg p-8 shadow-2xl">
+                                <h2 class="text-2xl font-bold text-white mb-6">Saved Passwords (${this.passwords.length})</h2>
+                                <div class="space-y-3">
+                                    ${this.passwords.length === 0 ? 
+                                        '<p class="text-gray-400">No passwords saved yet.</p>' : 
+                                        this.passwords.map(p => `
+                                            <div class="password-item bg-slate-700 p-4 rounded-lg border border-purple-500 flex justify-between items-center">
+                                                <div class="flex-1">
+                                                    <p class="font-bold text-purple-300">${p.website}</p>
+                                                    <p class="text-sm text-gray-400">${new Date(p.created_at).toLocaleDateString()}</p>
+                                                </div>
+                                                <div class="flex gap-2">
+                                                    <button onclick="manager.copyToClipboard('${p.password}')" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
+                                                        📋
+                                                    </button>
+                                                    <button onclick="manager.deletePassword(${p.id})" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded">
+                                                        🗑️
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        `).join('')
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                // Update input bindings
+                const websiteInput = document.getElementById('website');
+                const passwordInput = document.getElementById('password');
+                if (websiteInput) {
+                    websiteInput.value = this.newWebsite;
+                    websiteInput.addEventListener('input', (e) => { this.newWebsite = e.target.value; });
+                }
+                if (passwordInput) {
+                    passwordInput.value = this.newPassword;
+                    passwordInput.addEventListener('input', (e) => { this.newPassword = e.target.value; });
+                }
+            }
+        }
+
+        const manager = new PasswordManager();
+    </script>
+</body>
+</html>
