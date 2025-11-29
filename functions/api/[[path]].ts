@@ -2,7 +2,7 @@ import { Router, IRequest, error, json } from 'itty-router';
 
 // Define the environment interface for type safety
 export interface Env {
-    my_binding: any;
+    DB: any;
 }
 
 // Define the structure of a password entry from the DB
@@ -37,7 +37,7 @@ router.options('*', () => new Response(null, {
 // GET all passwords
 router.get('/api/passwords', async (request: IRequest, env: Env) => {
     try {
-        const stmt = env.my_binding.prepare(
+        const stmt = env.DB.prepare(
             'SELECT * FROM passwords ORDER BY created_at DESC'
         );
         const results = await stmt.all();
@@ -56,7 +56,7 @@ router.post('/api/passwords', async (request: IRequest, env: Env) => {
             return error(400, 'Website and password are required');
         }
 
-        const stmt = env.my_binding.prepare(
+        const stmt = env.DB.prepare(
             'INSERT INTO passwords (website, password) VALUES (?, ?) RETURNING *'
         );
         
@@ -81,7 +81,7 @@ router.delete('/api/passwords/:id', async (request: IRequest, env: Env) => {
     }
 
     try {
-        const stmt = env.my_binding.prepare(
+        const stmt = env.DB.prepare(
             'DELETE FROM passwords WHERE id = ?'
         );
         

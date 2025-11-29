@@ -4,20 +4,8 @@ compatibility_date = "2024-05-01"
 # This section configures your D1 Database.
 [[d1_databases]]
 # A binding name you can use in your code to reference the DB.
-binding = "my_binding"
+binding = "DB"
 # The name of your database.
 database_name = "password"
 # The unique ID of your database.
 database_id = "523df01e-9a94-4972-bea8-7b12968f5395"
-
-# Pages configuration - for static site + Functions
-[env.production]
-routes = [
-  { pattern = "example.com", zone_name = "example.com" }
-]
-
-[[d1_databases]]
-binding = "my_binding"
-database_name = "password"
-database_id = "523df01e-9a94-4972-bea8-7b12968f5395"
-environment = "production"
