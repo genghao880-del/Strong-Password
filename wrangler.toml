@@ -1,6 +1,12 @@
 name = "password"
 compatibility_date = "2024-05-01"
 
+# Assets directory for static files (HTML, CSS, JS, etc.)
+[assets]
+directory = "."
+include = ["index.html", "*.tsx", "*.ts", "*.css", "*.js"]
+exclude = ["node_modules", ".git", ".gitignore", "*.md", "wrangler.toml", "package.json", "tsconfig.json"]
+
 # This section configures your D1 Database.
 [[d1_databases]]
 # A binding name you can use in your code to reference the DB.
