@@ -1,5 +1,4 @@
 import { Router } from 'itty-router'
-import { sign, verify } from '@noble/ed25519'
 
 const router = Router()
 
@@ -234,11 +233,65 @@ router.delete('/api/passwords/:id', async (request, env) => {
   }
 })
 
+// Update password
+router.put('/api/passwords/:id', async (request, env) => {
+  try {
+    const userId = getUserFromRequest(request)
+    if (!userId) {
+      return addCors(new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } }))
+    }
+
+    const { id } = request.params
+    const { website, password } = await request.json()
+    
+    if (!id || !website || !password) {
+      return addCors(new Response(JSON.stringify({ error: 'id, website and password required' }), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+    }
+
+    // Verify ownership
+    const exists = await env.DB.prepare('SELECT id FROM passwords WHERE id = ? AND user_id = ?').bind(id, userId).first()
+    if (!exists) {
+      return addCors(new Response(JSON.stringify({ error: 'Password not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } }))
+    }
+
+    // Encrypt password
+    const encryptedPassword = encryptPassword(password, `user_${userId}`)
+
+    const stmt = env.DB.prepare('UPDATE passwords SET website = ?, password = ? WHERE id = ? AND user_id = ?')
+    await stmt.bind(website, encryptedPassword, id, userId).run()
+
+    return addCors(new Response(JSON.stringify({ success: true, id, website }), { headers: { 'Content-Type': 'application/json' } }))
+  } catch (e) {
+    return addCors(new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }))
+  }
+})
+
 // Fallback
 router.all('*', () => addCors(new Response('Not Found', { status: 404 })))
 
 export default {
   async fetch(request, env, ctx) {
+    // Try to serve static assets first
+    if (env.ASSETS) {
+      try {
+        const assetResponse = await env.ASSETS.fetch(request);
+        if (assetResponse.status !== 404) {
+          // Add cache control headers to prevent caching
+          const headers = new Headers(assetResponse.headers);
+          headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+          headers.set('Pragma', 'no-cache');
+          headers.set('Expires', '0');
+          return new Response(assetResponse.body, {
+            status: assetResponse.status,
+            statusText: assetResponse.statusText,
+            headers: headers
+          });
+        }
+      } catch (e) {
+        // Asset not found, continue to router
+      }
+    }
+    
     return router.handle(request, env, ctx)
   }
 }

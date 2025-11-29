@@ -3,6 +3,9 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
     <title>PassFortress - Secure Password Manager</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -13,11 +16,12 @@
         body {
             background-color: #0f172a;
         }
-        .copy-btn {
-            transition: all 0.2s ease;
+        .fade-in {
+            animation: fadeIn 0.3s ease;
         }
-        .copy-btn:hover {
-            transform: scale(1.1);
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
         }
         .password-item {
             animation: slideIn 0.3s ease;
@@ -25,6 +29,13 @@
         @keyframes slideIn {
             from { opacity: 0; transform: translateY(-10px); }
             to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-slideIn {
+            animation: slideInFromRight 0.3s ease;
+        }
+        @keyframes slideInFromRight {
+            from { opacity: 0; transform: translateX(100px); }
+            to { opacity: 1; transform: translateX(0); }
         }
     </style>
 </head>
@@ -36,171 +47,674 @@
 
         class PasswordManager {
             constructor() {
-                this.passwords = [];
-                this.showPassword = false;
-                this.generatedPassword = '';
-                this.newWebsite = '';
-                this.newPassword = '';
+                this.state = {
+                    screen: 'login', // login, register, app
+                    user: null,
+                    token: null,
+                    passwords: [],
+                    allPasswords: [], // Unfiltered passwords for search
+                    showPassword: false,
+                    generatedPassword: '',
+                    newWebsite: '',
+                    newPassword: '',
+                    email: '',
+                    password: '',
+                    theme: localStorage.getItem('theme') || 'dark',
+                    visiblePasswords: {}, // Track which passwords are visible
+                    toastMessage: '',
+                    toastType: '', // success, error, info
+                    showGeneratedPassword: false, // Track visibility of generated password
+                    searchQuery: '', // Search filter
+                    passwordLength: 16, // Customizable password length
+                    includeUppercase: true,
+                    includeLowercase: true,
+                    includeNumbers: true,
+                    includeSymbols: true,
+                    editingPasswordId: null, // Track which password is being edited
+                    favorites: JSON.parse(localStorage.getItem('favorites') || '[]'), // Favorite passwords
+                    showSettings: false, // Show password generator settings
+                    enable2FA: false // Two-factor authentication flag
+                };
                 this.init();
             }
 
-            async init() {
-                await this.loadPasswords();
+            init() {
+                const savedToken = localStorage.getItem('token');
+                const savedUser = localStorage.getItem('user');
+                if (savedToken && savedUser) {
+                    this.state.token = savedToken;
+                    this.state.user = JSON.parse(savedUser);
+                    this.state.screen = 'app';
+                    this.loadPasswords();
+                } else {
+                    this.render();
+                }
+            }
+
+            showToast(message, type = 'info') {
+                this.state.toastMessage = message;
+                this.state.toastType = type;
+                this.render();
+                setTimeout(() => {
+                    this.state.toastMessage = '';
+                    this.render();
+                }, 3000);
+            }
+
+            async register() {
+                if (!this.state.email || !this.state.password) {
+                    this.showToast('Please fill in all fields', 'error');
+                    return;
+                }
+                try {
+                    const res = await fetch(`${API_BASE}/api/auth/register`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email: this.state.email, password: this.state.password })
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        this.state.token = data.token;
+                        this.state.user = data.user;
+                        localStorage.setItem('token', data.token);
+                        localStorage.setItem('user', JSON.stringify(data.user));
+                        this.state.screen = 'app';
+                        this.state.email = '';
+                        this.state.password = '';
+                        await this.loadPasswords();
+                        this.render();
+                    } else {
+                        const error = await res.json();
+                        this.showToast('Registration failed: ' + error.error, 'error');
+                    }
+                } catch (e) {
+                    this.showToast('Error: ' + e.message, 'error');
+                }
+            }
+
+            async login() {
+                if (!this.state.email || !this.state.password) {
+                    this.showToast('Please fill in all fields', 'error');
+                    return;
+                }
+                try {
+                    const res = await fetch(`${API_BASE}/api/auth/login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email: this.state.email, password: this.state.password })
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        this.state.token = data.token;
+                        this.state.user = data.user;
+                        localStorage.setItem('token', data.token);
+                        localStorage.setItem('user', JSON.stringify(data.user));
+                        this.state.screen = 'app';
+                        this.state.email = '';
+                        this.state.password = '';
+                        await this.loadPasswords();
+                        this.render();
+                    } else {
+                        const error = await res.json();
+                        this.showToast('Login failed: ' + error.error, 'error');
+                    }
+                } catch (e) {
+                    this.showToast('Error: ' + e.message, 'error');
+                }
+            }
+
+            logout() {
+                this.state.user = null;
+                this.state.token = null;
+                this.state.passwords = [];
+                this.state.screen = 'login';
+                this.state.email = '';
+                this.state.password = '';
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
                 this.render();
             }
 
             async loadPasswords() {
                 try {
-                    const res = await fetch(`${API_BASE}/api/passwords`);
+                    const res = await fetch(`${API_BASE}/api/passwords`, {
+                        headers: { 'Authorization': `Bearer ${this.state.token}` }
+                    });
                     if (res.ok) {
-                        this.passwords = await res.json();
+                        this.state.allPasswords = await res.json();
+                        this.filterPasswords();
                     }
                 } catch (e) {
                     console.error('Failed to load passwords:', e);
                 }
             }
 
+            filterPasswords() {
+                const query = this.state.searchQuery.toLowerCase();
+                this.state.passwords = this.state.allPasswords.filter(p => 
+                    p.website.toLowerCase().includes(query)
+                );
+            }
+
+            searchPasswords(query) {
+                this.state.searchQuery = query;
+                this.filterPasswords();
+                this.render();
+            }
+
+            calculatePasswordStrength(pwd) {
+                let strength = 0;
+                if (pwd.length >= 8) strength++;
+                if (pwd.length >= 12) strength++;
+                if (pwd.length >= 16) strength++;
+                if (/[a-z]/.test(pwd)) strength++;
+                if (/[A-Z]/.test(pwd)) strength++;
+                if (/[0-9]/.test(pwd)) strength++;
+                if (/[^a-zA-Z0-9]/.test(pwd)) strength++;
+                
+                if (strength <= 2) return { level: 'weak', color: 'red', text: 'Weak' };
+                if (strength <= 5) return { level: 'medium', color: 'yellow', text: 'Medium' };
+                return { level: 'strong', color: 'green', text: 'Strong' };
+            }
+
             generatePassword() {
-                const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=[]{}|;:,.<>?';
+                let chars = '';
+                if (this.state.includeUppercase) chars += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+                if (this.state.includeLowercase) chars += 'abcdefghijklmnopqrstuvwxyz';
+                if (this.state.includeNumbers) chars += '0123456789';
+                if (this.state.includeSymbols) chars += '!@#$%^&*()_+-=[]{}|;:,.<>?';
+                
+                if (chars.length === 0) {
+                    this.showToast('Please select at least one character type', 'error');
+                    return;
+                }
+                
                 let pwd = '';
-                for (let i = 0; i < 16; i++) {
+                for (let i = 0; i < this.state.passwordLength; i++) {
                     pwd += chars.charAt(Math.floor(Math.random() * chars.length));
                 }
-                this.generatedPassword = pwd;
+                this.state.generatedPassword = pwd;
+                this.state.showGeneratedPassword = false;
                 this.render();
             }
 
             async savePassword() {
-                if (!this.newWebsite || !this.newPassword) {
-                    alert('Please fill in both website and password');
+                if (!this.state.newWebsite || !this.state.newPassword) {
+                    this.showToast('Please fill in both website and password', 'error');
                     return;
                 }
                 try {
                     const res = await fetch(`${API_BASE}/api/passwords`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ website: this.newWebsite, password: this.newPassword })
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${this.state.token}`
+                        },
+                        body: JSON.stringify({ website: this.state.newWebsite, password: this.state.newPassword })
                     });
                     if (res.ok) {
-                        this.newWebsite = '';
-                        this.newPassword = '';
-                        this.generatedPassword = '';
+                        this.state.newWebsite = '';
+                        this.state.newPassword = '';
+                        this.state.generatedPassword = '';
                         await this.loadPasswords();
-                        this.render();
+                        this.showToast('Password saved successfully! ✅', 'success');
                     } else {
-                        alert('Failed to save password');
+                        this.showToast('Failed to save password', 'error');
                     }
                 } catch (e) {
-                    alert('Error saving password: ' + e.message);
+                    this.showToast('Error saving password: ' + e.message, 'error');
                 }
             }
 
             async deletePassword(id) {
                 if (!confirm('Delete this password?')) return;
                 try {
-                    const res = await fetch(`${API_BASE}/api/passwords/${id}`, { method: 'DELETE' });
+                    const res = await fetch(`${API_BASE}/api/passwords/${id}`, {
+                        method: 'DELETE',
+                        headers: { 'Authorization': `Bearer ${this.state.token}` }
+                    });
                     if (res.ok) {
                         await this.loadPasswords();
-                        this.render();
+                        this.showToast('Password deleted! 🗑️', 'success');
                     } else {
-                        alert('Failed to delete password');
+                        this.showToast('Failed to delete password', 'error');
                     }
                 } catch (e) {
-                    alert('Error deleting password: ' + e.message);
+                    this.showToast('Error deleting password: ' + e.message, 'error');
                 }
+            }
+
+            startEditPassword(id, website, password) {
+                this.state.editingPasswordId = id;
+                this.state.newWebsite = website;
+                this.state.newPassword = password;
+                this.render();
+                setTimeout(() => {
+                    document.getElementById('website')?.focus();
+                }, 100);
+            }
+
+            async updatePassword() {
+                if (!this.state.newWebsite || !this.state.newPassword) {
+                    this.showToast('Please fill in both website and password', 'error');
+                    return;
+                }
+                try {
+                    const res = await fetch(`${API_BASE}/api/passwords/${this.state.editingPasswordId}`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${this.state.token}`
+                        },
+                        body: JSON.stringify({ website: this.state.newWebsite, password: this.state.newPassword })
+                    });
+                    if (res.ok) {
+                        this.state.newWebsite = '';
+                        this.state.newPassword = '';
+                        this.state.editingPasswordId = null;
+                        await this.loadPasswords();
+                        this.showToast('Password updated! ✏️', 'success');
+                    } else {
+                        this.showToast('Failed to update password', 'error');
+                    }
+                } catch (e) {
+                    this.showToast('Error updating password: ' + e.message, 'error');
+                }
+            }
+
+            cancelEdit() {
+                this.state.editingPasswordId = null;
+                this.state.newWebsite = '';
+                this.state.newPassword = '';
+                this.render();
+            }
+
+            toggleFavorite(id) {
+                const index = this.state.favorites.indexOf(id);
+                if (index > -1) {
+                    this.state.favorites.splice(index, 1);
+                } else {
+                    this.state.favorites.push(id);
+                }
+                localStorage.setItem('favorites', JSON.stringify(this.state.favorites));
+                this.render();
+            }
+
+            exportPasswords() {
+                const data = JSON.stringify(this.state.allPasswords, null, 2);
+                const blob = new Blob([data], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `passwords-backup-${new Date().toISOString().split('T')[0]}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+                this.showToast('Passwords exported! 📦', 'success');
+            }
+
+            importPasswords() {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = 'application/json';
+                input.onchange = async (e) => {
+                    try {
+                        const file = e.target.files[0];
+                        const text = await file.text();
+                        const imported = JSON.parse(text);
+                        
+                        for (const pwd of imported) {
+                            await fetch(`${API_BASE}/api/passwords`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${this.state.token}`
+                                },
+                                body: JSON.stringify({ website: pwd.website, password: pwd.password })
+                            });
+                        }
+                        
+                        await this.loadPasswords();
+                        this.showToast(`Imported ${imported.length} passwords! 📥`, 'success');
+                    } catch (e) {
+                        this.showToast('Failed to import: ' + e.message, 'error');
+                    }
+                };
+                input.click();
+            }
+
+            toggleTheme() {
+                this.state.theme = this.state.theme === 'dark' ? 'light' : 'dark';
+                localStorage.setItem('theme', this.state.theme);
+                document.body.className = this.state.theme === 'light' ? 'bg-gray-100 text-gray-900' : 'text-gray-200';
+                this.render();
+            }
+
+            getPasswordAge(createdAt) {
+                const days = Math.floor((Date.now() - new Date(createdAt)) / (1000 * 60 * 60 * 24));
+                if (days > 90) return { text: `${days} days old`, color: 'red', warning: true };
+                if (days > 60) return { text: `${days} days old`, color: 'yellow', warning: true };
+                return { text: `${days} days old`, color: 'green', warning: false };
             }
 
             copyToClipboard(text) {
                 navigator.clipboard.writeText(text).then(() => {
-                    alert('Copied to clipboard!');
+                    this.showToast('Copied to clipboard! 📋', 'success');
                 });
+            }
+
+            togglePasswordVisibility(id) {
+                this.state.visiblePasswords[id] = !this.state.visiblePasswords[id];
+                this.render();
+            }
+
+            toggleGeneratedPasswordVisibility() {
+                this.state.showGeneratedPassword = !this.state.showGeneratedPassword;
+                this.render();
+            }
+
+            useGeneratedPassword() {
+                this.state.newPassword = this.state.generatedPassword;
+                this.copyToClipboard(this.state.generatedPassword);
+                this.render();
+                // Auto-focus on website input after using generated password
+                setTimeout(() => {
+                    const websiteInput = document.getElementById('website');
+                    if (websiteInput && !this.state.newWebsite) {
+                        websiteInput.focus();
+                    }
+                }, 100);
+            }
+
+            toggleTheme() {
+                this.state.theme = this.state.theme === 'dark' ? 'light' : 'dark';
+                localStorage.setItem('theme', this.state.theme);
+                this.render();
             }
 
             render() {
                 const app = document.getElementById('app');
-                app.innerHTML = `
+                
+                if (this.state.screen === 'login') {
+                    app.innerHTML = this.renderLoginScreen();
+                } else if (this.state.screen === 'register') {
+                    app.innerHTML = this.renderRegisterScreen();
+                } else {
+                    app.innerHTML = this.renderAppScreen();
+                }
+                
+                // Render toast if present
+                if (this.state.toastMessage) {
+                    const existingToast = document.getElementById('toast');
+                    if (existingToast) existingToast.remove();
+                    
+                    const toast = document.createElement('div');
+                    toast.id = 'toast';
+                    toast.className = `fixed top-4 right-4 px-6 py-3 rounded-lg shadow-2xl text-white font-bold z-50 animate-slideIn ${
+                        this.state.toastType === 'success' ? 'bg-gradient-to-r from-green-600 to-emerald-600' :
+                        this.state.toastType === 'error' ? 'bg-gradient-to-r from-red-600 to-pink-600' :
+                        'bg-gradient-to-r from-blue-600 to-purple-600'
+                    }`;
+                    toast.textContent = this.state.toastMessage;
+                    document.body.appendChild(toast);
+                }
+            }
+
+            renderLoginScreen() {
+                return `
+                    <div class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center p-6">
+                        <div class="bg-slate-800 border border-purple-500 rounded-lg p-8 shadow-2xl max-w-md w-full">
+                            <h1 class="text-4xl font-bold text-white mb-2 text-center">🔐 PassFortress</h1>
+                            <p class="text-purple-300 text-center mb-8">Secure Password Manager</p>
+                            <div class="space-y-4">
+                                <input type="email" placeholder="Email" class="w-full bg-slate-700 text-white p-3 rounded-lg border border-purple-500 focus:outline-none focus:border-pink-500" id="login-email" />
+                                <input type="password" placeholder="Password" class="w-full bg-slate-700 text-white p-3 rounded-lg border border-purple-500 focus:outline-none focus:border-pink-500" id="login-password" />
+                                <button onclick="manager.login()" class="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-3 px-6 rounded-lg transition">
+                                    🔓 Login
+                                </button>
+                                <button onclick="manager.state.screen = 'register'; manager.render()" class="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 px-6 rounded-lg transition">
+                                    ✍️ Create Account
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            renderRegisterScreen() {
+                return `
+                    <div class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center p-6">
+                        <div class="bg-slate-800 border border-purple-500 rounded-lg p-8 shadow-2xl max-w-md w-full">
+                            <h1 class="text-4xl font-bold text-white mb-2 text-center">🔐 PassFortress</h1>
+                            <p class="text-purple-300 text-center mb-8">Create Your Account</p>
+                            <div class="space-y-4">
+                                <input type="email" placeholder="Email" class="w-full bg-slate-700 text-white p-3 rounded-lg border border-purple-500 focus:outline-none focus:border-pink-500" id="register-email" />
+                                <input type="password" placeholder="Password" class="w-full bg-slate-700 text-white p-3 rounded-lg border border-purple-500 focus:outline-none focus:border-pink-500" id="register-password" />
+                                <button onclick="manager.register()" class="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition">
+                                    ✅ Register
+                                </button>
+                                <button onclick="manager.state.screen = 'login'; manager.render()" class="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 px-6 rounded-lg transition">
+                                    🔓 Back to Login
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            renderAppScreen() {
+                const strength = this.state.generatedPassword ? this.calculatePasswordStrength(this.state.generatedPassword) : null;
+                const sortedPasswords = [...this.state.passwords].sort((a, b) => {
+                    const aFav = this.state.favorites.includes(a.id);
+                    const bFav = this.state.favorites.includes(b.id);
+                    if (aFav && !bFav) return -1;
+                    if (!aFav && bFav) return 1;
+                    return 0;
+                });
+                
+                return `
                     <div class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-6">
-                        <div class="max-w-4xl mx-auto">
+                        <div class="max-w-5xl mx-auto">
                             <!-- Header -->
-                            <div class="text-center mb-12">
-                                <h1 class="text-5xl font-bold text-white mb-2">🔐 PassFortress</h1>
-                                <p class="text-purple-300">Secure Password Manager</p>
+                            <div class="flex justify-between items-center mb-8">
+                                <div>
+                                    <h1 class="text-5xl font-bold text-white mb-2">🔐 PassFortress</h1>
+                                    <p class="text-purple-300">Welcome, ${this.state.user.email}!</p>
+                                </div>
+                                <div class="flex gap-2">
+                                    <button onclick="manager.toggleTheme()" class="bg-slate-700 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded transition" title="Toggle Theme">
+                                        ${this.state.theme === 'dark' ? '☀️' : '🌙'}
+                                    </button>
+                                    <button onclick="manager.exportPasswords()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition" title="Export">
+                                        📦 Export
+                                    </button>
+                                    <button onclick="manager.importPasswords()" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition" title="Import">
+                                        📥 Import
+                                    </button>
+                                    <button onclick="manager.logout()" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition">
+                                        🚪 Logout
+                                    </button>
+                                </div>
                             </div>
 
                             <!-- Generator Section -->
-                            <div class="bg-slate-800 border border-purple-500 rounded-lg p-8 mb-8 shadow-2xl">
-                                <h2 class="text-2xl font-bold text-white mb-6">Generate Strong Password</h2>
-                                <div class="space-y-4">
-                                    <button onclick="manager.generatePassword()" class="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-3 px-6 rounded-lg transition">
-                                        🎲 Generate Password
+                            <div class="bg-slate-800 border border-purple-500 rounded-lg p-6 mb-6 shadow-2xl">
+                                <div class="flex justify-between items-center mb-4">
+                                    <h2 class="text-2xl font-bold text-white">🎲 Generate Strong Password</h2>
+                                    <button onclick="manager.state.showSettings = !manager.state.showSettings; manager.render()" class="text-purple-300 hover:text-purple-100">
+                                        ⚙️ Settings
                                     </button>
-                                    ${this.generatedPassword ? `
+                                </div>
+                                
+                                ${this.state.showSettings ? `
+                                    <div class="bg-slate-700 p-4 rounded-lg mb-4 space-y-3">
+                                        <div class="flex items-center justify-between">
+                                            <label class="text-white">Length: ${this.state.passwordLength}</label>
+                                            <input type="range" min="8" max="32" value="${this.state.passwordLength}" 
+                                                onchange="manager.state.passwordLength = parseInt(this.value); manager.render()" 
+                                                class="w-48" />
+                                        </div>
+                                        <div class="grid grid-cols-2 gap-2">
+                                            <label class="flex items-center text-white cursor-pointer">
+                                                <input type="checkbox" ${this.state.includeUppercase ? 'checked' : ''} 
+                                                    onchange="manager.state.includeUppercase = this.checked; manager.render()" 
+                                                    class="mr-2" /> Uppercase (A-Z)
+                                            </label>
+                                            <label class="flex items-center text-white cursor-pointer">
+                                                <input type="checkbox" ${this.state.includeLowercase ? 'checked' : ''} 
+                                                    onchange="manager.state.includeLowercase = this.checked; manager.render()" 
+                                                    class="mr-2" /> Lowercase (a-z)
+                                            </label>
+                                            <label class="flex items-center text-white cursor-pointer">
+                                                <input type="checkbox" ${this.state.includeNumbers ? 'checked' : ''} 
+                                                    onchange="manager.state.includeNumbers = this.checked; manager.render()" 
+                                                    class="mr-2" /> Numbers (0-9)
+                                            </label>
+                                            <label class="flex items-center text-white cursor-pointer">
+                                                <input type="checkbox" ${this.state.includeSymbols ? 'checked' : ''} 
+                                                    onchange="manager.state.includeSymbols = this.checked; manager.render()" 
+                                                    class="mr-2" /> Symbols (!@#...)
+                                            </label>
+                                        </div>
+                                    </div>
+                                ` : ''}
+                                
+                                <button onclick="manager.generatePassword()" class="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-3 px-6 rounded-lg transition mb-3">
+                                    🎲 Generate Password
+                                </button>
+                                
+                                ${this.state.generatedPassword ? `
+                                    <div class="space-y-2">
+                                        ${strength ? `
+                                            <div class="flex items-center gap-2">
+                                                <div class="flex-1 bg-slate-700 rounded-full h-2">
+                                                    <div class="h-2 rounded-full transition-all" style="width: ${strength.level === 'weak' ? '33%' : strength.level === 'medium' ? '66%' : '100%'}; background-color: ${strength.color === 'red' ? '#ef4444' : strength.color === 'yellow' ? '#eab308' : '#22c55e'}"></div>
+                                                </div>
+                                                <span class="font-bold text-sm" style="color: ${strength.color === 'red' ? '#f87171' : strength.color === 'yellow' ? '#facc15' : '#4ade80'}">${strength.text}</span>
+                                            </div>
+                                        ` : ''}
                                         <div class="flex gap-2">
-                                            <input type="text" value="${this.generatedPassword}" readonly class="flex-1 bg-slate-700 text-white p-3 rounded-lg border border-purple-500" />
-                                            <button onclick="manager.copyToClipboard('${this.generatedPassword}')" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg">
-                                                📋 Copy
+                                            <input type="${this.state.showGeneratedPassword ? 'text' : 'password'}" value="${this.state.generatedPassword}" readonly class="flex-1 bg-slate-700 text-white p-3 rounded-lg border border-purple-500 font-mono" />
+                                            <button onclick="manager.toggleGeneratedPasswordVisibility()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-4 rounded-lg transition" title="${this.state.showGeneratedPassword ? 'Hide' : 'Show'}">
+                                                ${this.state.showGeneratedPassword ? '👁️' : '🔒'}
+                                            </button>
+                                            <button onclick="manager.copyToClipboard('${this.state.generatedPassword}')" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition">
+                                                📋
+                                            </button>
+                                            <button onclick="manager.useGeneratedPassword()" class="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg transition">
+                                                ✅
                                             </button>
                                         </div>
-                                    ` : ''}
-                                </div>
+                                    </div>
+                                ` : ''}
                             </div>
 
-                            <!-- Save Password Section -->
-                            <div class="bg-slate-800 border border-purple-500 rounded-lg p-8 mb-8 shadow-2xl">
-                                <h2 class="text-2xl font-bold text-white mb-6">Save Password</h2>
-                                <div class="space-y-4">
-                                    <input type="text" placeholder="Website (e.g., gmail.com)" class="w-full bg-slate-700 text-white p-3 rounded-lg border border-purple-500 focus:outline-none focus:border-pink-500" id="website" />
-                                    <input type="text" placeholder="Password" class="w-full bg-slate-700 text-white p-3 rounded-lg border border-purple-500 focus:outline-none focus:border-pink-500" id="password" />
-                                    <button onclick="manager.savePassword()" class="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition">
-                                        ✅ Save Password
-                                    </button>
-                                </div>
-                            </div>
-
-                            <!-- Passwords List -->
-                            <div class="bg-slate-800 border border-purple-500 rounded-lg p-8 shadow-2xl">
-                                <h2 class="text-2xl font-bold text-white mb-6">Saved Passwords (${this.passwords.length})</h2>
+                            <!-- Save/Edit Password Section -->
+                            <div class="bg-slate-800 border border-purple-500 rounded-lg p-6 mb-6 shadow-2xl">
+                                <h2 class="text-2xl font-bold text-white mb-4">${this.state.editingPasswordId ? '✏️ Edit Password' : '💾 Save Password'}</h2>
                                 <div class="space-y-3">
-                                    ${this.passwords.length === 0 ? 
-                                        '<p class="text-gray-400">No passwords saved yet.</p>' : 
-                                        this.passwords.map(p => `
-                                            <div class="password-item bg-slate-700 p-4 rounded-lg border border-purple-500 flex justify-between items-center">
-                                                <div class="flex-1">
-                                                    <p class="font-bold text-purple-300">${p.website}</p>
-                                                    <p class="text-sm text-gray-400">${new Date(p.created_at).toLocaleDateString()}</p>
-                                                </div>
-                                                <div class="flex gap-2">
-                                                    <button onclick="manager.copyToClipboard('${p.password}')" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
-                                                        📋
-                                                    </button>
-                                                    <button onclick="manager.deletePassword(${p.id})" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded">
-                                                        🗑️
-                                                    </button>
+                                    <input type="text" placeholder="Website (e.g., gmail.com)" value="${this.state.newWebsite}" class="w-full bg-slate-700 text-white p-3 rounded-lg border border-purple-500 focus:outline-none focus:border-pink-500" id="website" />
+                                    <input type="password" placeholder="Password" value="${this.state.newPassword}" class="w-full bg-slate-700 text-white p-3 rounded-lg border border-purple-500 focus:outline-none focus:border-pink-500 font-mono" id="password" />
+                                    ${this.state.editingPasswordId ? `
+                                        <div class="flex gap-2">
+                                            <button onclick="manager.updatePassword()" class="flex-1 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-bold py-3 px-6 rounded-lg transition">
+                                                ✏️ Update Password
+                                            </button>
+                                            <button onclick="manager.cancelEdit()" class="bg-slate-600 hover:bg-slate-500 text-white font-bold py-3 px-6 rounded-lg transition">
+                                                ❌ Cancel
+                                            </button>
+                                        </div>
+                                    ` : `
+                                        <button onclick="manager.savePassword()" class="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition">
+                                            💾 Save Password
+                                        </button>
+                                    `}
+                                </div>
+                            </div>
+
+                            <!-- Search & Passwords List -->
+                            <div class="bg-slate-800 border border-purple-500 rounded-lg p-6 shadow-2xl">
+                                <div class="flex justify-between items-center mb-4">
+                                    <h2 class="text-2xl font-bold text-white">🔑 Saved Passwords (${this.state.passwords.length})</h2>
+                                </div>
+                                
+                                <!-- Search Bar -->
+                                <input type="text" placeholder="🔍 Search passwords..." value="${this.state.searchQuery}" 
+                                    oninput="manager.searchPasswords(this.value)" 
+                                    class="w-full bg-slate-700 text-white p-3 rounded-lg border border-purple-500 focus:outline-none focus:border-pink-500 mb-4" />
+                                
+                                <div class="space-y-3 max-h-96 overflow-y-auto">
+                                    ${this.state.passwords.length === 0 ? 
+                                        '<p class="text-gray-400 text-center py-8">No passwords found.</p>' : 
+                                        sortedPasswords.map(p => {
+                                            const age = this.getPasswordAge(p.created_at);
+                                            const isFavorite = this.state.favorites.includes(p.id);
+                                            return `
+                                            <div class="password-item bg-slate-700 p-4 rounded-lg border ${isFavorite ? 'border-yellow-500' : 'border-purple-500'} transition-all">
+                                                <div class="flex justify-between items-start mb-2">
+                                                    <div class="flex-1">
+                                                        <div class="flex items-center gap-2">
+                                                            <button onclick="manager.toggleFavorite(${p.id})" class="text-2xl" title="${isFavorite ? 'Remove from favorites' : 'Add to favorites'}">
+                                                                ${isFavorite ? '⭐' : '☆'}
+                                                            </button>
+                                                            <p class="font-bold text-purple-300 text-lg">${p.website}</p>
+                                                        </div>
+                                                        <p class="text-sm text-gray-400 font-mono ml-8">${this.state.visiblePasswords[p.id] ? p.password : '••••••••••••'}</p>
+                                                        <div class="flex items-center gap-3 mt-2 ml-8">
+                                                            <p class="text-xs text-gray-500">📅 ${new Date(p.created_at).toLocaleDateString()}</p>
+                                                            <p class="text-xs" style="color: ${age.color === 'red' ? '#f87171' : age.color === 'yellow' ? '#facc15' : '#4ade80'}">${age.warning ? '⚠️ ' : ''}${age.text}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div class="flex gap-1">
+                                                        <button onclick="manager.togglePasswordVisibility(${p.id})" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded transition text-sm" title="${this.state.visiblePasswords[p.id] ? 'Hide' : 'Show'}">
+                                                            ${this.state.visiblePasswords[p.id] ? '👁️' : '🔒'}
+                                                        </button>
+                                                        <button onclick="manager.copyToClipboard('${p.password}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded transition text-sm" title="Copy">
+                                                            📋
+                                                        </button>
+                                                        <button onclick="manager.startEditPassword(${p.id}, '${p.website}', '${p.password}')" class="bg-cyan-600 hover:bg-cyan-700 text-white px-3 py-2 rounded transition text-sm" title="Edit">
+                                                            ✏️
+                                                        </button>
+                                                        <button onclick="manager.deletePassword(${p.id})" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded transition text-sm" title="Delete">
+                                                            🗑️
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             </div>
-                                        `).join('')
+                                        `}).join('')
                                     }
                                 </div>
                             </div>
                         </div>
                     </div>
                 `;
-
-                // Update input bindings
-                const websiteInput = document.getElementById('website');
-                const passwordInput = document.getElementById('password');
-                if (websiteInput) {
-                    websiteInput.value = this.newWebsite;
-                    websiteInput.addEventListener('input', (e) => { this.newWebsite = e.target.value; });
-                }
-                if (passwordInput) {
-                    passwordInput.value = this.newPassword;
-                    passwordInput.addEventListener('input', (e) => { this.newPassword = e.target.value; });
-                }
+            }
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
             }
         }
 
         const manager = new PasswordManager();
+
+        // Update input bindings
+        setInterval(() => {
+            const websiteInput = document.getElementById('website');
+            const passwordInput = document.getElementById('password');
+            const loginEmail = document.getElementById('login-email');
+            const loginPassword = document.getElementById('login-password');
+            const registerEmail = document.getElementById('register-email');
+            const registerPassword = document.getElementById('register-password');
+
+            if (websiteInput) websiteInput.addEventListener('input', (e) => { manager.state.newWebsite = e.target.value; });
+            if (passwordInput) passwordInput.addEventListener('input', (e) => { manager.state.newPassword = e.target.value; });
+            if (loginEmail) loginEmail.addEventListener('input', (e) => { manager.state.email = e.target.value; });
+            if (loginPassword) loginPassword.addEventListener('input', (e) => { manager.state.password = e.target.value; });
+            if (registerEmail) registerEmail.addEventListener('input', (e) => { manager.state.email = e.target.value; });
+            if (registerPassword) registerPassword.addEventListener('input', (e) => { manager.state.password = e.target.value; });
+        }, 100);
     </script>
 </body>
 </html>
