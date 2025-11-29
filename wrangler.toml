@@ -1,0 +1,27 @@
+name = "passfortress"
+compatibility_date = "2024-05-01"
+
+# This section configures your Cloudflare Pages project.
+[pages]
+# The branch to deploy from.
+main_branch = "main"
+# The directory containing your Functions.
+functions_dir = "functions"
+
+[pages.build]
+# The directory to publish. Since this is a static app with no build step,
+# we publish the root directory containing index.html.
+output = "."
+# No build command is needed for this simple static setup.
+command = ""
+
+# This section configures your D1 Database.
+[[d1_databases]]
+# A binding name you can use in your code to reference the DB.
+binding = "DB"
+# The name of your database.
+database_name = "passfortress-db"
+# The unique ID of your database.
+# IMPORTANT: After running `npm run db:create`, paste the generated ID here,
+# or use the deploy.sh script which will automatically update this value.
+database_id = ""
