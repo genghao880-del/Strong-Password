@@ -238,13 +238,13 @@ async function verifyTOTP(secret, code) {
 // ============ CORS Middleware ============
 // Allowed origins (可根据需要扩展)
 const ALLOWED_ORIGINS = [
-  'https://password.genghao880.workers.dev'
+  'https://661985.xyz'
 ]
 
 // OPTIONS 预检
 router.options('*', (request) => {
   const origin = request.headers.get('Origin')
-  const allowOrigin = origin && ALLOWED_ORIGINS.includes(origin) ? origin : 'https://password.genghao880.workers.dev'
+  const allowOrigin = origin && ALLOWED_ORIGINS.includes(origin) ? origin : 'https://661985.xyz'
   return new Response(null, {
     status: 204,
     headers: {
@@ -259,16 +259,16 @@ router.options('*', (request) => {
 // 安全响应头 + CORS + RateLimit 头
 function applySecurityHeaders(response, request, rateInfo) {
   const origin = request.headers.get('Origin')
-  const allowOrigin = origin && ALLOWED_ORIGINS.includes(origin) ? origin : 'https://password.genghao880.workers.dev'
+  const allowOrigin = origin && ALLOWED_ORIGINS.includes(origin) ? origin : 'https://661985.xyz'
   const h = response.headers
   h.set('Access-Control-Allow-Origin', allowOrigin)
   h.set('Vary', 'Origin')
   h.set('X-Content-Type-Options', 'nosniff')
-  h.set('X-Frame-Options', 'DENY')
+  h.set('X-Frame-Options', 'SAMEORIGIN')
   h.set('Referrer-Policy', 'strict-origin-when-cross-origin')
   h.set('Permissions-Policy', 'geolocation=(), microphone=(), camera=()')
   h.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
-  h.set('Content-Security-Policy', "default-src 'self'; script-src 'self' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; upgrade-insecure-requests")
+  h.set('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'")
   if (rateInfo) {
     h.set('X-RateLimit-Limit', rateInfo.limit.toString())
     h.set('X-RateLimit-Remaining', Math.max(rateInfo.limit - rateInfo.count, 0).toString())
