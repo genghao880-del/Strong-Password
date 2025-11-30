@@ -653,9 +653,12 @@ export default {
           if (assetResp.status === 200) {
             const headers = new Headers();
             headers.set('Content-Type', 'text/html; charset=utf-8');
-            headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+            headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0, s-maxage=0');
             headers.set('Pragma', 'no-cache');
             headers.set('Expires', '0');
+            headers.set('Clear-Site-Data', '"cache"');
+            // Add version ETag to force revalidation
+            headers.set('ETag', '"v4-2025-11-30"');
             return applySecurityHeaders(new Response(assetResp.body, { status: 200, headers }), request, null, env);
           }
         } catch (e) {
