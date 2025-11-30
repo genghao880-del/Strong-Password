@@ -84,7 +84,6 @@
                     ,twoFACode: ''
                     ,showDeleteConfirm: false
                     ,deleteTargetId: null
-                    ,gptEnabled: true
                 };
                 this.init();
             }
@@ -639,40 +638,39 @@
                             <!-- Header -->
                             <div class="flex justify-between items-center mb-8">
                                 <div>
-                                    <h1 class="text-5xl font-bold text-white mb-2 flex items-center gap-3">🔐 PassFortress <span class="px-3 py-1 text-sm rounded-full bg-gradient-to-r from-[#F48120] to-orange-500 text-white font-semibold shadow">GPT-5 Enabled</span></h1>
-                                    <p class="text-purple-300">Welcome, ${this.state.user.email}!</p>
+                                    <h1 class="text-5xl font-bold text-white mb-2">🔐 PassFortress</h1>
+                                    <p class="text-gray-400 text-sm">欢迎回来，<span class="text-[#F48120] font-semibold">${this.state.user.email}</span></p>
                                 </div>
                                 <div class="flex gap-2">
-                                    <button onclick="manager.toggleTheme()" class="bg-slate-700 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded transition" title="Toggle Theme">
-                                        ${this.state.theme === 'dark' ? '☀️' : '🌙'}
+                                    <button onclick="manager.toggleTheme()" class="bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2.5 px-4 rounded-lg transition shadow-lg" title="切换主题">
+                                        ${this.state.theme === 'dark' ? '☀️ 浅色' : '🌙 深色'}
                                     </button>
-                                    <button onclick="manager.state.gptEnabled=!manager.state.gptEnabled; manager.render()" class="bg-[#F48120] hover:bg-orange-600 text-white font-bold py-2 px-4 rounded transition" title="Toggle GPT">${this.state.gptEnabled ? '🧠 On' : '🧠 Off'}</button>
-                                    <button onclick="manager.exportPasswords()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition" title="Export">
-                                        📦 Export
+                                    <button onclick="manager.exportPasswords()" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 px-4 rounded-lg transition shadow-lg" title="导出密码">
+                                        📦 导出
                                     </button>
-                                    <button onclick="manager.importPasswords()" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition" title="Import">
-                                        📥 Import
+                                    <button onclick="manager.importPasswords()" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2.5 px-4 rounded-lg transition shadow-lg" title="导入密码">
+                                        📥 导入
                                     </button>
-                                    <button onclick="manager.open2FA()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded transition" title="2FA">
+                                    <button onclick="manager.open2FA()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 px-4 rounded-lg transition shadow-lg" title="双因素认证">
                                         ${this.state.twoFAEnabled ? '🔒 2FA 已启用' : '🔐 启用 2FA'}
                                     </button>
-                                    <button onclick="manager.logout()" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition">🚪 Logout</button>
+                                    <button onclick="manager.logout()" class="bg-red-600 hover:bg-red-700 text-white font-semibold py-2.5 px-4 rounded-lg transition shadow-lg" title="退出登录">🚺 退出</button>
                                 </div>
                             </div>
 
                             <!-- Generator Section -->
                             <div class="bg-slate-800 border border-purple-500 rounded-lg p-6 mb-6 shadow-2xl">
                                 <div class="flex justify-between items-center mb-4">
-                                    <h2 class="text-2xl font-bold text-white">🎲 Generate Strong Password</h2>
+                                    <h2 class="text-2xl font-bold text-white">🎲 生成强密码</h2>
                                     <button onclick="manager.state.showSettings = !manager.state.showSettings; manager.render()" class="text-purple-300 hover:text-purple-100">
-                                        ⚙️ Settings
+                                        ⚙️ 设置
                                     </button>
                                 </div>
                                 
                                 ${this.state.showSettings ? `
                                     <div class="bg-slate-700 p-4 rounded-lg mb-4 space-y-3">
                                         <div class="flex items-center justify-between">
-                                            <label class="text-white">Length: ${this.state.passwordLength}</label>
+                                            <label class="text-white">长度: ${this.state.passwordLength}</label>
                                             <input type="range" min="8" max="32" value="${this.state.passwordLength}" 
                                                 onchange="manager.state.passwordLength = parseInt(this.value); manager.render()" 
                                                 class="w-48" />
@@ -681,29 +679,29 @@
                                             <label class="flex items-center text-white cursor-pointer">
                                                 <input type="checkbox" ${this.state.includeUppercase ? 'checked' : ''} 
                                                     onchange="manager.state.includeUppercase = this.checked; manager.render()" 
-                                                    class="mr-2" /> Uppercase (A-Z)
+                                                    class="mr-2" /> 大写字母 (A-Z)
                                             </label>
                                             <label class="flex items-center text-white cursor-pointer">
                                                 <input type="checkbox" ${this.state.includeLowercase ? 'checked' : ''} 
                                                     onchange="manager.state.includeLowercase = this.checked; manager.render()" 
-                                                    class="mr-2" /> Lowercase (a-z)
+                                                    class="mr-2" /> 小写字母 (a-z)
                                             </label>
                                             <label class="flex items-center text-white cursor-pointer">
                                                 <input type="checkbox" ${this.state.includeNumbers ? 'checked' : ''} 
                                                     onchange="manager.state.includeNumbers = this.checked; manager.render()" 
-                                                    class="mr-2" /> Numbers (0-9)
+                                                    class="mr-2" /> 数字 (0-9)
                                             </label>
                                             <label class="flex items-center text-white cursor-pointer">
                                                 <input type="checkbox" ${this.state.includeSymbols ? 'checked' : ''} 
                                                     onchange="manager.state.includeSymbols = this.checked; manager.render()" 
-                                                    class="mr-2" /> Symbols (!@#...)
+                                                    class="mr-2" /> 符号 (!@#...)
                                             </label>
                                         </div>
                                     </div>
                                 ` : ''}
                                 
                                 <button onclick="manager.generatePassword()" class="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-3 px-6 rounded-lg transition mb-3">
-                                    🎲 Generate Password
+                                    🎲 生成密码
                                 </button>
                                 
                                 ${this.state.generatedPassword ? `
@@ -734,22 +732,22 @@
 
                             <!-- Save/Edit Password Section -->
                             <div class="bg-slate-800 border border-purple-500 rounded-lg p-6 mb-6 shadow-2xl">
-                                <h2 class="text-2xl font-bold text-white mb-4">${this.state.editingPasswordId ? '✏️ Edit Password' : '💾 Save Password'}</h2>
+                                <h2 class="text-2xl font-bold text-white mb-4">${this.state.editingPasswordId ? '✏️ 编辑密码' : '💾 保存密码'}</h2>
                                 <div class="space-y-3">
-                                    <input type="text" placeholder="Website (e.g., gmail.com)" value="${this.state.newWebsite}" class="w-full bg-slate-700 text-white p-3 rounded-lg border border-purple-500 focus:outline-none focus:border-pink-500" id="website" />
-                                    <input type="password" placeholder="Password" value="${this.state.newPassword}" class="w-full bg-slate-700 text-white p-3 rounded-lg border border-purple-500 focus:outline-none focus:border-pink-500 font-mono" id="password" />
+                                    <input type="text" placeholder="网站 (例如：gmail.com)" value="${this.state.newWebsite}" class="w-full bg-slate-700 text-white p-3 rounded-lg border border-purple-500 focus:outline-none focus:border-pink-500" id="website" />
+                                    <input type="password" placeholder="密码" value="${this.state.newPassword}" class="w-full bg-slate-700 text-white p-3 rounded-lg border border-purple-500 focus:outline-none focus:border-pink-500 font-mono" id="password" />
                                     ${this.state.editingPasswordId ? `
                                         <div class="flex gap-2">
                                             <button onclick="manager.updatePassword()" class="flex-1 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-bold py-3 px-6 rounded-lg transition">
-                                                ✏️ Update Password
+                                                ✏️ 更新密码
                                             </button>
                                             <button onclick="manager.cancelEdit()" class="bg-slate-600 hover:bg-slate-500 text-white font-bold py-3 px-6 rounded-lg transition">
-                                                ❌ Cancel
+                                                ❌ 取消
                                             </button>
                                         </div>
                                     ` : `
                                         <button onclick="manager.savePassword()" class="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-bold py-3 px-6 rounded-lg transition">
-                                            💾 Save Password
+                                            💾 保存密码
                                         </button>
                                     `}
                                 </div>
@@ -758,17 +756,17 @@
                             <!-- Search & Passwords List -->
                             <div class="bg-slate-800 border border-purple-500 rounded-lg p-6 shadow-2xl">
                                 <div class="flex justify-between items-center mb-4">
-                                    <h2 class="text-2xl font-bold text-white">🔑 Saved Passwords (${this.state.passwords.length})</h2>
+                                    <h2 class="text-2xl font-bold text-white">🔑 已保存密码 (${this.state.passwords.length})</h2>
                                 </div>
                                 
                                 <!-- Search Bar -->
-                                <input type="text" placeholder="🔍 Search passwords..." value="${this.state.searchQuery}" 
+                                <input type="text" placeholder="🔍 搜索密码..." value="${this.state.searchQuery}" 
                                     oninput="manager.searchPasswords(this.value)" 
                                     class="w-full bg-slate-700 text-white p-3 rounded-lg border border-purple-500 focus:outline-none focus:border-pink-500 mb-4" />
                                 
                                 <div class="space-y-3 max-h-96 overflow-y-auto">
                                     ${this.state.passwords.length === 0 ? 
-                                        '<p class="text-gray-400 text-center py-8">No passwords found.</p>' : 
+                                        '<p class="text-gray-400 text-center py-8">暂无密码。</p>' : 
                                         sortedPasswords.map(p => {
                                             const age = this.getPasswordAge(p.created_at);
                                             const isFavorite = this.state.favorites.includes(p.id);
