@@ -951,6 +951,8 @@
         }
 
         const manager = new PasswordManager();
+        // 初次加载渲染界面
+        manager.render();
 
         // Update input bindings
         setInterval(() => {
