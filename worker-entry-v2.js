@@ -653,6 +653,10 @@ export default {
           const assetReq = new Request(new URL('/index.html', url.origin), request);
           const assetResp = await env.ASSETS.fetch(assetReq);
           if (assetResp.status === 200) {
+            // 读取HTML文本并移除 Cloudflare Insights 注入的脚本标签
+            const html = await assetResp.text();
+            const sanitized = html.replace(/<script[^>]*src="https:\/\/static\.cloudflareinsights\.com\/beacon\.min\.js[^"]*"[\s\S]*?<\/script>/gi, "");
+
             const headers = new Headers();
             headers.set('Content-Type', 'text/html; charset=utf-8');
             headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0, s-maxage=0');
@@ -662,7 +666,7 @@ export default {
             // 使用时间戳作为ETag强制浏览器重新验证
             headers.set('ETag', `"v5-${Date.now()}"`);
             headers.set('Last-Modified', new Date().toUTCString());
-            return applySecurityHeaders(new Response(assetResp.body, { status: 200, headers }), request, null, env);
+            return applySecurityHeaders(new Response(sanitized, { status: 200, headers }), request, null, env);
           }
         } catch (e) {
           console.error('ASSETS error:', e);
