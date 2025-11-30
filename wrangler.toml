@@ -12,6 +12,10 @@ directory = "public"
 [vars]
 CUSTOM_DOMAIN = "661985.xyz"
 
+# 文档与展示约定：
+# - 对外 README 精简链接到 docs/PROJECT_GUIDE.md
+# - 所有部署与初始化流程以综合指南为准
+
 # D1 Database
 [[d1_databases]]
 binding = "DB"
