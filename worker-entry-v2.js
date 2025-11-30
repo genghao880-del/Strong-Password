@@ -4,27 +4,52 @@ const router = Router()
 
 // ============ Helper Functions ============
 
-// Simple base64 encoding/decoding for crypto operations
+// Base64 helpers
 function base64ToBytes(str) {
   return Uint8Array.from(atob(str), c => c.charCodeAt(0))
 }
-
 function bytesToBase64(bytes) {
   return btoa(String.fromCharCode(...bytes))
 }
 
-// Simple hash function (for demo - use bcrypt in production)
-async function hashPassword(password) {
+// Legacy hash (backwards compatibility for existing accounts)
+async function legacyHashPassword(password) {
   const enc = new TextEncoder()
   const data = enc.encode(password + 'salt_demo')
   const hashBuffer = await crypto.subtle.digest('SHA-256', data)
   return bytesToBase64(new Uint8Array(hashBuffer))
 }
 
-// Verify password
-async function verifyPassword(password, hash) {
-  const newHash = await hashPassword(password)
-  return newHash === hash
+// Create PBKDF2 hash with random salt: returns "salt:hash" (both base64)
+async function createPasswordHash(password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16))
+  const enc = new TextEncoder()
+  const passKey = await crypto.subtle.importKey('raw', enc.encode(password), { name: 'PBKDF2' }, false, ['deriveBits'])
+  const derivedBits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' }, passKey, 256)
+  const derived = new Uint8Array(derivedBits)
+  const saltB64 = bytesToBase64(salt)
+  const hashB64 = bytesToBase64(derived)
+  return `${saltB64}:${hashB64}`
+}
+
+// Verify hash supporting both new format (salt:hash) and legacy
+async function verifyPassword(password, stored) {
+  if (!stored.includes(':')) {
+    // Legacy path
+    const legacy = await legacyHashPassword(password)
+    return legacy === stored
+  }
+  const [saltB64, hashB64] = stored.split(':')
+  const salt = base64ToBytes(saltB64)
+  const enc = new TextEncoder()
+  const passKey = await crypto.subtle.importKey('raw', enc.encode(password), { name: 'PBKDF2' }, false, ['deriveBits'])
+  const derivedBits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' }, passKey, 256)
+  const derived = bytesToBase64(new Uint8Array(derivedBits))
+  // Constant time compare
+  if (derived.length !== hashB64.length) return false
+  let diff = 0
+  for (let i = 0; i < derived.length; i++) diff |= derived.charCodeAt(i) ^ hashB64.charCodeAt(i)
+  return diff === 0
 }
 
 // Generate JWT token
@@ -108,14 +133,26 @@ router.post('/api/auth/register', async (request, env) => {
       return addCors(new Response(JSON.stringify({ error: 'email and password required' }), { status: 400, headers: { 'Content-Type': 'application/json' } }))
     }
 
+    // Basic server-side validation (avoid user enumeration / weak password acceptance)
+    const emailRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
+    if (!emailRegex.test(email)) {
+      return addCors(new Response(JSON.stringify({ error: 'Invalid registration data' }), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+    }
+    // Password policy: >=8 chars, include 3 of (lower, upper, number, symbol)
+    const categories = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^a-zA-Z0-9]/].reduce((acc, r) => acc + (r.test(password) ? 1 : 0), 0)
+    if (password.length < 8 || categories < 3) {
+      return addCors(new Response(JSON.stringify({ error: 'Invalid registration data' }), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+    }
+
     // Check if user exists
     const existing = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first()
     if (existing) {
-      return addCors(new Response(JSON.stringify({ error: 'User already exists' }), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+      // Generic message to avoid enumeration
+      return addCors(new Response(JSON.stringify({ error: 'Registration failed' }), { status: 400, headers: { 'Content-Type': 'application/json' } }))
     }
 
-    // Hash password
-    const passwordHash = await hashPassword(password)
+    // Hash password (PBKDF2)
+    const passwordHash = await createPasswordHash(password)
 
     // Create user
     const stmt = env.DB.prepare('INSERT INTO users (email, password_hash) VALUES (?, ?) RETURNING id, email')
@@ -137,7 +174,13 @@ router.post('/api/auth/login', async (request, env) => {
       return addCors(new Response(JSON.stringify({ error: 'email and password required' }), { status: 400, headers: { 'Content-Type': 'application/json' } }))
     }
 
-    const user = await env.DB.prepare('SELECT id, password_hash FROM users WHERE email = ?').bind(email).first()
+    // Normalize email (defensive)
+    const normalizedEmail = email.trim().toLowerCase()
+    const emailRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
+    if (!emailRegex.test(normalizedEmail)) {
+      return addCors(new Response(JSON.stringify({ error: 'Invalid credentials' }), { status: 401, headers: { 'Content-Type': 'application/json' } }))
+    }
+    const user = await env.DB.prepare('SELECT id, password_hash FROM users WHERE email = ?').bind(normalizedEmail).first()
     if (!user) {
       return addCors(new Response(JSON.stringify({ error: 'Invalid credentials' }), { status: 401, headers: { 'Content-Type': 'application/json' } }))
     }
@@ -149,7 +192,7 @@ router.post('/api/auth/login', async (request, env) => {
 
     const token = await generateToken(user.id)
 
-    return addCors(new Response(JSON.stringify({ user: { id: user.id, email }, token }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    return addCors(new Response(JSON.stringify({ user: { id: user.id, email: normalizedEmail }, token }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
   } catch (e) {
     return addCors(new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }))
   }

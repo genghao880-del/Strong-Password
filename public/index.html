@@ -74,6 +74,9 @@
                     favorites: JSON.parse(localStorage.getItem('favorites') || '[]'), // Favorite passwords
                     showSettings: false, // Show password generator settings
                     enable2FA: false // Two-factor authentication flag
+                    ,showDeleteConfirm: false
+                    ,deleteTargetId: null
+                    ,gptEnabled: true
                 };
                 this.init();
             }
@@ -106,6 +109,14 @@
                     this.showToast('Please fill in all fields', 'error');
                     return;
                 }
+                if (!this.validateEmail(this.state.email)) {
+                    this.showToast('Invalid email format', 'error');
+                    return;
+                }
+                if (!this.validatePasswordPolicy(this.state.password)) {
+                    this.showToast('Password too weak (≥8 & 3 types)', 'error');
+                    return;
+                }
                 try {
                     const res = await fetch(`${API_BASE}/api/auth/register`, {
                         method: 'POST',
@@ -135,6 +146,10 @@
             async login() {
                 if (!this.state.email || !this.state.password) {
                     this.showToast('Please fill in all fields', 'error');
+                    return;
+                }
+                if (!this.validateEmail(this.state.email)) {
+                    this.showToast('Invalid email format', 'error');
                     return;
                 }
                 try {
@@ -217,6 +232,15 @@
                 return { level: 'strong', color: 'green', text: 'Strong' };
             }
 
+            validateEmail(email) {
+                return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
+            }
+
+            validatePasswordPolicy(pwd) {
+                const categories = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^a-zA-Z0-9]/].reduce((a,r)=> a + (r.test(pwd)?1:0),0);
+                return pwd.length >= 8 && categories >= 3;
+            }
+
             generatePassword() {
                 let chars = '';
                 if (this.state.includeUppercase) chars += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -267,7 +291,14 @@
             }
 
             async deletePassword(id) {
-                if (!confirm('Delete this password?')) return;
+                this.state.showDeleteConfirm = true;
+                this.state.deleteTargetId = id;
+                this.render();
+            }
+
+            async confirmDelete() {
+                const id = this.state.deleteTargetId;
+                if (!id) { this.state.showDeleteConfirm = false; this.render(); return; }
                 try {
                     const res = await fetch(`${API_BASE}/api/passwords/${id}`, {
                         method: 'DELETE',
@@ -275,13 +306,22 @@
                     });
                     if (res.ok) {
                         await this.loadPasswords();
-                        this.showToast('Password deleted! 🗑️', 'success');
+                        this.showToast('Deleted ✅', 'success');
                     } else {
-                        this.showToast('Failed to delete password', 'error');
+                        this.showToast('Delete failed', 'error');
                     }
                 } catch (e) {
-                    this.showToast('Error deleting password: ' + e.message, 'error');
+                    this.showToast('Error: ' + e.message, 'error');
                 }
+                this.state.showDeleteConfirm = false;
+                this.state.deleteTargetId = null;
+                this.render();
+            }
+
+            cancelDelete() {
+                this.state.showDeleteConfirm = false;
+                this.state.deleteTargetId = null;
+                this.render();
             }
 
             startEditPassword(id, website, password) {
@@ -457,6 +497,25 @@
                     toast.textContent = this.state.toastMessage;
                     document.body.appendChild(toast);
                 }
+                                // Delete confirmation modal
+                                const existingModal = document.getElementById('delete-modal');
+                                if (existingModal) existingModal.remove();
+                                if (this.state.showDeleteConfirm) {
+                                        const modal = document.createElement('div');
+                                        modal.id = 'delete-modal';
+                                        modal.className = 'fixed inset-0 flex items-center justify-center z-50';
+                                        modal.innerHTML = `
+                                            <div class="absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
+                                            <div class="relative bg-[#0F1E2E] border border-[#F48120] rounded-xl p-6 w-[340px] shadow-2xl animate-slideIn">
+                                                <h3 class="text-xl font-bold text-white mb-2">Confirm Deletion</h3>
+                                                <p class="text-sm text-gray-300 mb-4">This action will permanently remove the password entry.</p>
+                                                <div class="flex gap-3">
+                                                    <button onclick="manager.confirmDelete()" class="flex-1 bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-700 hover:to-orange-700 text-white font-bold py-2 rounded-lg transition">Delete</button>
+                                                    <button onclick="manager.cancelDelete()" class="flex-1 bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 rounded-lg transition">Cancel</button>
+                                                </div>
+                                            </div>`;
+                                        document.body.appendChild(modal);
+                                }
             }
 
             renderLoginScreen() {
@@ -512,18 +571,19 @@
                 });
                 
                 return `
-                    <div class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-6">
+                    <div class="min-h-screen bg-gradient-to-br from-[#0F1E2E] via-slate-900 to-[#0F1E2E] p-6">
                         <div class="max-w-5xl mx-auto">
                             <!-- Header -->
                             <div class="flex justify-between items-center mb-8">
                                 <div>
-                                    <h1 class="text-5xl font-bold text-white mb-2">🔐 PassFortress</h1>
+                                    <h1 class="text-5xl font-bold text-white mb-2 flex items-center gap-3">🔐 PassFortress <span class="px-3 py-1 text-sm rounded-full bg-gradient-to-r from-[#F48120] to-orange-500 text-white font-semibold shadow">GPT-5 Enabled</span></h1>
                                     <p class="text-purple-300">Welcome, ${this.state.user.email}!</p>
                                 </div>
                                 <div class="flex gap-2">
                                     <button onclick="manager.toggleTheme()" class="bg-slate-700 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded transition" title="Toggle Theme">
                                         ${this.state.theme === 'dark' ? '☀️' : '🌙'}
                                     </button>
+                                    <button onclick="manager.state.gptEnabled=!manager.state.gptEnabled; manager.render()" class="bg-[#F48120] hover:bg-orange-600 text-white font-bold py-2 px-4 rounded transition" title="Toggle GPT">${this.state.gptEnabled ? '🧠 On' : '🧠 Off'}</button>
                                     <button onclick="manager.exportPasswords()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition" title="Export">
                                         📦 Export
                                     </button>
