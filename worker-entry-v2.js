@@ -638,13 +638,19 @@ export default {
           const assetReq = new Request(new URL('/index.html', url.origin), request);
           const assetResp = await env.ASSETS.fetch(assetReq);
           if (assetResp.status === 200) {
-            const headers = new Headers(assetResp.headers);
+            let html = await assetResp.text();
+            // 添加时间戳到资源URL防止缓存
+            const timestamp = Date.now();
+            html = html.replace(/cdn\.tailwindcss\.com/g, `cdn.tailwindcss.com?t=${timestamp}`);
+            
+            const headers = new Headers();
             headers.set('Content-Type', 'text/html; charset=utf-8');
-            headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+            headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
             headers.set('Pragma', 'no-cache');
             headers.set('Expires', '0');
             headers.set('X-Content-Type-Options', 'nosniff');
-            return applySecurityHeaders(new Response(assetResp.body, { status: 200, headers }), request);
+            headers.set('Clear-Site-Data', '"cache"');
+            return applySecurityHeaders(new Response(html, { status: 200, headers }), request);
           }
         } catch (e) {
           console.error('ASSETS error:', e);
