@@ -27,6 +27,23 @@ async function ensureMigration(env) {
         // ignore
       }
     }
+    if (!pcols.includes('tags')) {
+      try {
+        await env.DB.prepare('ALTER TABLE passwords ADD COLUMN tags TEXT DEFAULT ""').run()
+      } catch (e) {
+        // ignore
+      }
+    }
+    // Recovery codes table
+    const rcInfo = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='recovery_codes'").all()
+    if (rcInfo.results.length === 0) {
+      try {
+        await env.DB.prepare('CREATE TABLE recovery_codes (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, code_hash TEXT, used INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)').run()
+        await env.DB.prepare('CREATE INDEX idx_recovery_user ON recovery_codes(user_id)').run()
+      } catch (e) {
+        // ignore
+      }
+    }
   } catch (e) {
     // swallow errors to avoid breaking requests
   } finally {
@@ -446,7 +463,7 @@ router.get('/api/passwords', async (request, env) => {
       return addCors(new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request)
     }
 
-    const stmt = env.DB.prepare('SELECT id, website, username, password, created_at FROM passwords WHERE user_id = ? ORDER BY created_at DESC')
+    const stmt = env.DB.prepare('SELECT id, website, username, tags, password, created_at FROM passwords WHERE user_id = ? ORDER BY created_at DESC')
     const results = await stmt.bind(userId).all()
 
     // Decrypt passwords (in frontend)
@@ -469,7 +486,7 @@ router.post('/api/passwords', async (request, env) => {
       return addCors(new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request)
     }
 
-    const { website, username = '', password } = await request.json()
+    const { website, username = '', tags = [], password } = await request.json()
     if (!website || !password) {
       return addCors(new Response(JSON.stringify({ error: 'website and password required' }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request)
     }
@@ -477,8 +494,9 @@ router.post('/api/passwords', async (request, env) => {
     // Encrypt password
     const encryptedPassword = encryptPassword(password, `user_${userId}`)
 
-    const stmt = env.DB.prepare('INSERT INTO passwords (user_id, website, username, password) VALUES (?, ?, ?, ?) RETURNING id, website, username, created_at')
-    const result = await stmt.bind(userId, website, username, encryptedPassword).first()
+    const tagsStr = Array.isArray(tags) ? tags.join(',') : ''
+    const stmt = env.DB.prepare('INSERT INTO passwords (user_id, website, username, tags, password) VALUES (?, ?, ?, ?, ?) RETURNING id, website, username, tags, created_at')
+    const result = await stmt.bind(userId, website, username, tagsStr, encryptedPassword).first()
 
     return addCors(new Response(JSON.stringify({ ...result, password }), { status: 201, headers: { 'Content-Type': 'application/json' } }), request)
   } catch (e) {
@@ -523,7 +541,7 @@ router.put('/api/passwords/:id', async (request, env) => {
     }
 
     const { id } = request.params
-    const { website, username = '', password } = await request.json()
+    const { website, username = '', tags = [], password } = await request.json()
     
     if (!id || !website || !password) {
       return addCors(new Response(JSON.stringify({ error: 'id, website and password required' }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request)
@@ -538,10 +556,57 @@ router.put('/api/passwords/:id', async (request, env) => {
     // Encrypt password
     const encryptedPassword = encryptPassword(password, `user_${userId}`)
 
-    const stmt = env.DB.prepare('UPDATE passwords SET website = ?, username = ?, password = ? WHERE id = ? AND user_id = ?')
-    await stmt.bind(website, username, encryptedPassword, id, userId).run()
+    const tagsStr = Array.isArray(tags) ? tags.join(',') : ''
+    const stmt = env.DB.prepare('UPDATE passwords SET website = ?, username = ?, tags = ?, password = ? WHERE id = ? AND user_id = ?')
+    await stmt.bind(website, username, tagsStr, encryptedPassword, id, userId).run()
 
-    return addCors(new Response(JSON.stringify({ success: true, id, website, username }), { headers: { 'Content-Type': 'application/json' } }), request)
+    return addCors(new Response(JSON.stringify({ success: true, id, website, username, tags }), { headers: { 'Content-Type': 'application/json' } }), request)
+  } catch (e) {
+    return addCors(new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }), request)
+  }
+})
+
+// Generate recovery codes (requires 2FA enabled)
+router.post('/api/auth/2fa/recovery/generate', async (request, env) => {
+  try {
+    await ensureMigration(env)
+    const userId = getUserFromRequest(request)
+    if (!userId) return addCors(new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request)
+    const user = await env.DB.prepare('SELECT two_factor_enabled FROM users WHERE id = ?').bind(userId).first()
+    if (!user || !user.two_factor_enabled) return addCors(new Response(JSON.stringify({ error: '2FA not enabled' }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request)
+    // Invalidate old unused codes
+    await env.DB.prepare('DELETE FROM recovery_codes WHERE user_id = ? AND used = 0').bind(userId).run()
+    const codes = []
+    for (let i = 0; i < 10; i++) {
+      const raw = [...crypto.getRandomValues(new Uint8Array(6))].map(b => (b % 36).toString(36)).join('').toUpperCase()
+      const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw))
+      const hash = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2,'0')).join('')
+      await env.DB.prepare('INSERT INTO recovery_codes (user_id, code_hash) VALUES (?, ?)').bind(userId, hash).run()
+      codes.push(raw)
+    }
+    return addCors(new Response(JSON.stringify({ codes }), { status: 201, headers: { 'Content-Type': 'application/json' } }), request)
+  } catch (e) {
+    return addCors(new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }), request)
+  }
+})
+
+// Verify recovery code (tempToken + recoveryCode)
+router.post('/api/auth/2fa/recovery/verify', async (request, env) => {
+  try {
+    await ensureMigration(env)
+    const { tempToken, recoveryCode } = await request.json()
+    if (!tempToken || !recoveryCode) return addCors(new Response(JSON.stringify({ error: 'tempToken and recoveryCode required' }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request)
+    const decoded = decodeToken(tempToken)
+    if (!decoded || decoded.twofa !== 'pending') return addCors(new Response(JSON.stringify({ error: 'Invalid token' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request)
+    const user = await env.DB.prepare('SELECT id, email, two_factor_enabled FROM users WHERE id = ?').bind(decoded.userId).first()
+    if (!user || !user.two_factor_enabled) return addCors(new Response(JSON.stringify({ error: '2FA not enabled' }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request)
+    const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(recoveryCode.toUpperCase()))
+    const hash = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2,'0')).join('')
+    const rec = await env.DB.prepare('SELECT id, used FROM recovery_codes WHERE user_id = ? AND code_hash = ?').bind(user.id, hash).first()
+    if (!rec || rec.used) return addCors(new Response(JSON.stringify({ error: 'Invalid code' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request)
+    await env.DB.prepare('UPDATE recovery_codes SET used = 1 WHERE id = ?').bind(rec.id).run()
+    const fullToken = await generateToken(user.id)
+    return addCors(new Response(JSON.stringify({ user: { id: user.id, email: user.email }, token: fullToken }), { status: 200, headers: { 'Content-Type': 'application/json' } }), request)
   } catch (e) {
     return addCors(new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }), request)
   }
@@ -561,20 +626,37 @@ export default {
       if (!rateInfo.allowed) {
         return applySecurityHeaders(new Response(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429, headers: { 'Content-Type': 'application/json' } }), request, rateInfo)
       }
+      await ensureMigration(env)
       const apiResp = await router.handle(request, env, ctx)
       return applySecurityHeaders(apiResp, request, rateInfo)
     }
     
-    // Try to serve static assets
+    // For root path, serve HTML directly from ASSETS
+    if (url.pathname === '/' || url.pathname === '/index.html') {
+      if (env.ASSETS) {
+        try {
+          const assetReq = new Request(new URL('/index.html', url.origin), request);
+          const assetResp = await env.ASSETS.fetch(assetReq);
+          if (assetResp.status === 200) {
+            const headers = new Headers(assetResp.headers);
+            headers.set('Content-Type', 'text/html; charset=utf-8');
+            headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+            return applySecurityHeaders(new Response(assetResp.body, { status: 200, headers }), request);
+          }
+        } catch (e) {
+          console.error('ASSETS error:', e);
+        }
+      }
+      return applySecurityHeaders(new Response('Service temporarily unavailable', { status: 503 }), request);
+    }
+    
+    // Try to serve other static assets
     if (env.ASSETS) {
       try {
         const assetResponse = await env.ASSETS.fetch(request);
         if (assetResponse.status !== 404) {
-          // Add cache control headers to prevent caching
           const headers = new Headers(assetResponse.headers);
           headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-          headers.set('Pragma', 'no-cache');
-          headers.set('Expires', '0');
           const resp = new Response(assetResponse.body, { status: assetResponse.status, statusText: assetResponse.statusText, headers })
           return applySecurityHeaders(resp, request)
         }

@@ -74,6 +74,8 @@
                     includeSymbols: true,
                     editingPasswordId: null, // Track which password is being edited
                     favorites: JSON.parse(localStorage.getItem('favorites') || '[]'), // Favorite passwords
+                    selectedIds: [], // Bulk selection
+                    recoveryCodes: [], // Generated recovery codes (one-time display)
                     showSettings: false, // Show password generator settings
                     enable2FA: false // Two-factor authentication flag
                     ,twoFAEnabled: false
@@ -85,8 +87,30 @@
                     ,twoFACode: ''
                     ,showDeleteConfirm: false
                     ,deleteTargetId: null
+                    ,clientInfo: this.detectClient()
                 };
+                this.toastTimer = null;
                 this.init();
+            }
+
+            detectClient() {
+                const ua = navigator.userAgent;
+                const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+                let platform = 'Unknown';
+                let browser = 'Unknown';
+                
+                if (/Android/i.test(ua)) platform = 'Android';
+                else if (/iPhone|iPad|iPod/i.test(ua)) platform = 'iOS';
+                else if (/Windows/i.test(ua)) platform = 'Windows';
+                else if (/Mac/i.test(ua)) platform = 'macOS';
+                else if (/Linux/i.test(ua)) platform = 'Linux';
+                
+                if (/Chrome/i.test(ua) && !/Edg/i.test(ua)) browser = 'Chrome';
+                else if (/Safari/i.test(ua) && !/Chrome/i.test(ua)) browser = 'Safari';
+                else if (/Firefox/i.test(ua)) browser = 'Firefox';
+                else if (/Edg/i.test(ua)) browser = 'Edge';
+                
+                return { isMobile, platform, browser };
             }
 
             init() {
@@ -103,11 +127,17 @@
             }
 
             showToast(message, type = 'info') {
+                // 清除之前的定时器
+                if (this.toastTimer) {
+                    clearTimeout(this.toastTimer);
+                }
                 this.state.toastMessage = message;
                 this.state.toastType = type;
                 this.render();
-                setTimeout(() => {
+                // 设置新的定时器
+                this.toastTimer = setTimeout(() => {
                     this.state.toastMessage = '';
+                    this.toastTimer = null;
                     this.render();
                 }, 3000);
             }
@@ -296,7 +326,7 @@
                             'Content-Type': 'application/json',
                             'Authorization': `Bearer ${this.state.token}`
                         },
-                        body: JSON.stringify({ website: this.state.newWebsite, username: this.state.newUsername, password: this.state.newPassword })
+                        body: JSON.stringify({ website: this.state.newWebsite, username: this.state.newUsername, tags: [], password: this.state.newPassword })
                     });
                     if (res.ok) {
                         this.state.newWebsite = '';
@@ -370,7 +400,7 @@
                             'Content-Type': 'application/json',
                             'Authorization': `Bearer ${this.state.token}`
                         },
-                        body: JSON.stringify({ website: this.state.newWebsite, username: this.state.newUsername, password: this.state.newPassword })
+                        body: JSON.stringify({ website: this.state.newWebsite, username: this.state.newUsername, tags: [], password: this.state.newPassword })
                     });
                     if (res.ok) {
                         this.state.newWebsite = '';
@@ -403,6 +433,86 @@
                 }
                 localStorage.setItem('favorites', JSON.stringify(this.state.favorites));
                 this.render();
+            }
+
+            toggleSelect(id) {
+                const idx = this.state.selectedIds.indexOf(id);
+                if (idx > -1) this.state.selectedIds.splice(idx,1); else this.state.selectedIds.push(id);
+                this.render();
+            }
+
+            clearSelection() {
+                this.state.selectedIds = [];
+                this.render();
+            }
+
+            bulkDelete() {
+                if (this.state.selectedIds.length === 0) return;
+                if (!confirm(`确定删除选中的 ${this.state.selectedIds.length} 条密码?`)) return;
+                Promise.all(this.state.selectedIds.map(id => fetch(`${API_BASE}/api/passwords/${id}`, { method:'DELETE', headers:{'Authorization':`Bearer ${this.state.token}`} })))
+                    .then(()=> this.loadPasswords().then(()=> { this.showToast('批量删除完成', 'success'); this.clearSelection(); }))
+                    .catch(e=> this.showToast('批量删除失败: '+e.message,'error'));
+            }
+
+            bulkExport() {
+                if (this.state.selectedIds.length === 0) return;
+                const subset = this.state.allPasswords.filter(p=> this.state.selectedIds.includes(p.id)).map(p=> ({
+                    id: p.id,
+                    website: p.website,
+                    username: p.username || '',
+                    password: p.password,
+                    created_at: p.created_at
+                }));
+                const data = JSON.stringify(subset, null, 2);
+                const blob = new Blob([data], { type:'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `passwords-selected-${new Date().toISOString().split('T')[0]}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+                this.showToast('已导出选中项 📦','success');
+            }
+
+            async generateRecoveryCodes() {
+                try {
+                    const res = await fetch(`${API_BASE}/api/auth/2fa/recovery/generate`, { method:'POST', headers:{'Authorization':`Bearer ${this.state.token}`} })
+                    const data = await res.json()
+                    if (res.ok) {
+                        this.state.recoveryCodes = data.codes;
+                        this.showToast('恢复码已生成','success');
+                        this.render();
+                    } else {
+                        this.showToast('生成失败: '+(data.error||'错误'),'error');
+                    }
+                } catch(e){
+                    this.showToast('生成失败: '+e.message,'error');
+                }
+            }
+
+            async verifyRecoveryCode() {
+                if (!this.state.twoFATempToken || !this.state.twoFACode) { this.showToast('请输入恢复码','error'); return; }
+                try {
+                    const res = await fetch(`${API_BASE}/api/auth/2fa/recovery/verify`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ tempToken: this.state.twoFATempToken, recoveryCode: this.state.twoFACode }) })
+                    const data = await res.json();
+                    if (res.ok && data.token) {
+                        this.state.token = data.token;
+                        this.state.user = data.user;
+                        localStorage.setItem('token', data.token);
+                        localStorage.setItem('user', JSON.stringify(data.user));
+                        this.state.screen = 'app';
+                        this.state.twoFAStage = 'idle';
+                        this.state.twoFATempToken = '';
+                        this.state.twoFACode = '';
+                        await this.loadPasswords();
+                        this.showToast('恢复码验证成功 ✅','success');
+                        this.render();
+                    } else {
+                        this.showToast('恢复码无效','error');
+                    }
+                } catch(e){
+                    this.showToast('验证失败: '+e.message,'error');
+                }
             }
 
             exportPasswords() {
@@ -441,7 +551,7 @@
                                     'Content-Type': 'application/json',
                                     'Authorization': `Bearer ${this.state.token}`
                                 },
-                                body: JSON.stringify({ website: pwd.website, username: pwd.username || '', password: pwd.password })
+                                body: JSON.stringify({ website: pwd.website, username: pwd.username || '', tags: [], password: pwd.password })
                             });
                         }
                         
@@ -569,11 +679,15 @@
                                                     </div>`;
                                         } else if (this.state.twoFAStage === 'verify') {
                                                 bodyHTML = `
-                                                    <p class='text-sm text-gray-300 mb-4'>输入二次验证码完成登录。</p>
-                                                    <input type='text' placeholder='6位验证码' class='w-full bg-slate-700 text-white p-2 rounded mb-3 text-center tracking-widest' oninput='manager.state.twoFACode = this.value' />
-                                                    <div class='flex gap-2'>
-                                                        <button onclick='manager.verifyLogin2FA()' class='flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded'>验证</button>
-                                                        <button onclick='manager.close2FAModal()' class='flex-1 bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 rounded'>取消</button>
+                                                    <p class='text-sm text-gray-300 mb-4'>输入动态验证码或使用恢复码。</p>
+                                                    <div class='space-y-3'>
+                                                        <input type='text' placeholder='动态验证码 (6位)' class='w-full bg-slate-700 text-white p-2 rounded text-center tracking-widest' oninput='manager.state.twoFACode = this.value' />
+                                                        <button onclick='manager.verifyLogin2FA()' class='w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded'>使用动态验证码</button>
+                                                        <div class='border-t border-slate-600 pt-3'>
+                                                            <input type='text' placeholder='恢复码 (不区分大小写)' class='w-full bg-slate-700 text-white p-2 rounded text-center' oninput='manager.state.twoFACode = this.value' />
+                                                            <button onclick='manager.verifyRecoveryCode()' class='w-full mt-2 bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 rounded'>使用恢复码</button>
+                                                        </div>
+                                                        <button onclick='manager.close2FAModal()' class='w-full bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 rounded'>取消</button>
                                                     </div>`;
                                         } else if (this.state.twoFAStage === 'disable') {
                                                 bodyHTML = `
@@ -651,25 +765,26 @@
                     <div class="min-h-screen bg-gradient-to-br from-[#0F1E2E] via-slate-900 to-[#0F1E2E] p-6">
                         <div class="max-w-5xl mx-auto">
                             <!-- Header -->
-                            <div class="flex justify-between items-center mb-8">
+                            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
                                 <div>
-                                    <h1 class="text-5xl font-bold text-white mb-2">🔐 PassFortress</h1>
-                                    <p class="text-gray-400 text-sm">欢迎回来，<span class="text-[#F48120] font-semibold">${this.state.user.email}</span></p>
+                                    <h1 class="text-3xl sm:text-4xl font-bold text-white mb-1">🔐 PassFortress</h1>
+                                    <p class="text-gray-400 text-xs sm:text-sm">欢迎，<span class="text-[#F48120] font-semibold">${this.state.user.email}</span></p>
+                                    <p class="text-gray-500 text-[10px] mt-0.5">${this.state.clientInfo.isMobile ? '📱' : '💻'} ${this.state.clientInfo.platform} · ${this.state.clientInfo.browser}</p>
                                 </div>
-                                <div class="flex gap-2">
-                                    <button onclick="manager.toggleTheme()" class="bg-slate-700 hover:bg-slate-600 text-white font-semibold py-2.5 px-4 rounded-lg transition shadow-lg" title="切换主题">
-                                        ${this.state.theme === 'dark' ? '☀️ 浅色' : '🌙 深色'}
+                                <div class="flex flex-wrap gap-1.5">
+                                    <button onclick="manager.toggleTheme()" class="bg-slate-700 hover:bg-slate-600 text-white text-xs py-1.5 px-2.5 rounded-lg transition" title="主题">
+                                        ${this.state.theme === 'dark' ? '☀️' : '🌙'}
                                     </button>
-                                    <button onclick="manager.exportPasswords()" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 px-4 rounded-lg transition shadow-lg" title="导出密码">
-                                        📦 导出
+                                    <button onclick="manager.exportPasswords()" class="bg-blue-600 hover:bg-blue-700 text-white text-xs py-1.5 px-2.5 rounded-lg transition" title="导出">
+                                        📦
                                     </button>
-                                    <button onclick="manager.importPasswords()" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2.5 px-4 rounded-lg transition shadow-lg" title="导入密码">
-                                        📥 导入
+                                    <button onclick="manager.importPasswords()" class="bg-green-600 hover:bg-green-700 text-white text-xs py-1.5 px-2.5 rounded-lg transition" title="导入">
+                                        📥
                                     </button>
-                                    <button onclick="manager.open2FA()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 px-4 rounded-lg transition shadow-lg" title="双因素认证">
-                                        ${this.state.twoFAEnabled ? '🔒 2FA 已启用' : '🔐 启用 2FA'}
+                                    <button onclick="manager.open2FA()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs py-1.5 px-2.5 rounded-lg transition" title="2FA">
+                                        ${this.state.twoFAEnabled ? '🔒' : '🔐'}
                                     </button>
-                                    <button onclick="manager.logout()" class="bg-red-600 hover:bg-red-700 text-white font-semibold py-2.5 px-4 rounded-lg transition shadow-lg" title="退出登录">🚺 退出</button>
+                                    <button onclick="manager.logout()" class="bg-red-600 hover:bg-red-700 text-white text-xs py-1.5 px-2.5 rounded-lg transition" title="退出">🚪</button>
                                 </div>
                             </div>
                             <div class="flex flex-col lg:flex-row gap-6">
@@ -678,6 +793,12 @@
                                     <div class="bg-slate-800 border border-purple-500 rounded-lg p-6 shadow-2xl h-full">
                                         <div class="flex justify-between items-center mb-4">
                                             <h2 class="text-2xl font-bold text-white">🔑 已保存密码 (${this.state.passwords.length})</h2>
+                                            <div class="flex items-center gap-2">
+                                                ${this.state.selectedIds.length > 0 ? `<span class='text-xs text-gray-300'>已选 ${this.state.selectedIds.length}</span>` : ''}
+                                                <button onclick="manager.clearSelection()" class="bg-slate-600 hover:bg-slate-500 text-white px-3 py-1 rounded text-xs" title="清除选择">🧹</button>
+                                                <button onclick="manager.bulkExport()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs" title="导出选中" ${this.state.selectedIds.length===0?'disabled style=\'opacity:.4;cursor:not-allowed;\'' : ''}>📦</button>
+                                                <button onclick="manager.bulkDelete()" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs" title="删除选中" ${this.state.selectedIds.length===0?'disabled style=\'opacity:.4;cursor:not-allowed;\'' : ''}>🗑️</button>
+                                            </div>
                                         </div>
                                         <input type="text" placeholder="🔍 搜索密码..." value="${this.state.searchQuery}" 
                                             oninput="manager.searchPasswords(this.value)" 
@@ -693,6 +814,7 @@
                                                         <div class="flex justify-between items-start mb-2">
                                                             <div class="flex-1">
                                                                 <div class="flex items-center gap-2">
+                                                                    <input type='checkbox' onclick="manager.toggleSelect(${p.id})" ${this.state.selectedIds.includes(p.id)?'checked':''} class='accent-[#F48120] w-4 h-4' title='选择' />
                                                                     <button onclick="manager.toggleFavorite(${p.id})" class="text-2xl" title="${isFavorite ? '移出收藏' : '加入收藏'}">
                                                                         ${isFavorite ? '⭐' : '☆'}
                                                                     </button>
@@ -705,17 +827,17 @@
                                                                     <p class="text-xs" style="color: ${age.color === 'red' ? '#f87171' : age.color === 'yellow' ? '#facc15' : '#4ade80'}">${age.warning ? '⚠️ ' : ''}${age.text}</p>
                                                                 </div>
                                                             </div>
-                                                            <div class="flex gap-1">
-                                                                <button onclick="manager.togglePasswordVisibility(${p.id})" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded-lg transition text-sm" title="${this.state.visiblePasswords[p.id] ? '隐藏' : '显示'}">
+                                                            <div class="flex flex-wrap gap-1">
+                                                                <button onclick="manager.togglePasswordVisibility(${p.id})" class="bg-purple-600 hover:bg-purple-700 text-white px-2 py-1.5 rounded-lg transition text-xs" title="${this.state.visiblePasswords[p.id] ? '隐藏' : '显示'}">
                                                                     ${this.state.visiblePasswords[p.id] ? '👁️' : '🔒'}
                                                                 </button>
-                                                                <button onclick="manager.copyToClipboard('${p.password}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg transition text-sm" title="复制">
+                                                                <button onclick="manager.copyToClipboard('${p.password}')" class="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1.5 rounded-lg transition text-xs" title="复制">
                                                                     📋
                                                                 </button>
-                                                                <button onclick="manager.startEditPassword(${p.id}, '${p.website}', '${p.password}', '${(p.username||'').replace(/'/g, "&#39;")}')" class="bg-cyan-600 hover:bg-cyan-700 text-white px-3 py-2 rounded-lg transition text-sm" title="编辑">
+                                                                <button onclick="manager.startEditPassword(${p.id}, '${p.website}', '${p.password}', '${(p.username||'').replace(/'/g, "&#39;")}')" class="bg-cyan-600 hover:bg-cyan-700 text-white px-2 py-1.5 rounded-lg transition text-xs" title="编辑">
                                                                     ✏️
                                                                 </button>
-                                                                <button onclick="manager.deletePassword(${p.id})" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg transition text-sm" title="删除">
+                                                                <button onclick="manager.deletePassword(${p.id})" class="bg-red-600 hover:bg-red-700 text-white px-2 py-1.5 rounded-lg transition text-xs" title="删除">
                                                                     🗑️
                                                                 </button>
                                                             </div>
@@ -865,6 +987,8 @@
                     this.state.show2FAModal = false;
                     this.state.twoFAStage = 'idle';
                     this.state.twoFACode='';
+                    // 自动生成恢复码
+                    await this.generateRecoveryCodes();
                     this.showToast('2FA 已启用','success');
                     this.render();
                 } else this.showToast(data.error || '启用失败','error');
