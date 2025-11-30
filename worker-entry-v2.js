@@ -281,7 +281,8 @@ function applySecurityHeaders(response, request, rateInfo, env) {
   h.set('Referrer-Policy', 'strict-origin-when-cross-origin')
   h.set('Permissions-Policy', 'geolocation=(), microphone=(), camera=()')
   h.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
-  h.set('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'")
+  // 完全放宽CSP策略，允许所有来源
+  h.set('Content-Security-Policy', "default-src 'self' 'unsafe-inline' 'unsafe-eval' *; script-src 'self' 'unsafe-inline' 'unsafe-eval' *; style-src 'self' 'unsafe-inline' *; font-src 'self' *; img-src 'self' data: *; connect-src 'self' *; object-src 'none'; base-uri 'self'")
   if (rateInfo) {
     h.set('X-RateLimit-Limit', rateInfo.limit.toString())
     h.set('X-RateLimit-Remaining', Math.max(rateInfo.limit - rateInfo.count, 0).toString())
