@@ -209,6 +209,10 @@
                     ,twoFACode: ''
                     ,showDeleteConfirm: false
                     ,deleteTargetId: null
+                    ,deleteTargetType: null // 'password' | 'user' | 'admin-password' | 'admin-user'
+                    ,deleteTargetUserId: null // For admin password deletion
+                    ,deletePromptTitle: ''
+                    ,deletePromptText: ''
                     ,clientInfo: this.detectClient()
                     ,lastSaved: { website: '', username: '', password: '' }
                     ,editingOriginal: { website: '', username: '', password: '' }
@@ -863,12 +867,19 @@
                 }
             }
 
-            async deleteUser(userId) {
+            deleteUser(userId) {
                 if (!this.isAdmin()) return;
-                if (!confirm('确定要删除该用户及其所有数据吗？此操作不可逆！')) return;
-                
+                this.state.deleteTargetId = userId;
+                this.state.deleteTargetType = 'admin-user';
+                this.state.deletePromptTitle = '⚠️ 危险操作';
+                this.state.deletePromptText = '该操作将永久删除该用户及其所有密码数据，且无法恢复！';
+                this.state.showDeleteConfirm = true;
+                this.render();
+            }
+
+            async executeDeleteUser() {
                 try {
-                    const res = await fetch(`${API_BASE}/api/admin/users/${userId}`, {
+                    const res = await fetch(`${API_BASE}/api/admin/users/${this.state.deleteTargetId}`, {
                         method: 'DELETE',
                         headers: { 'Authorization': `Bearer ${this.state.token}` }
                     });
@@ -911,12 +922,20 @@
                 }
             }
 
-            async deletePasswordAsAdmin(passwordId, userId) {
+            deletePasswordAsAdmin(passwordId, userId) {
                 if (!this.isAdmin()) return;
-                if (!confirm('确定要删除该密码吗？此操作不可逆！')) return;
-                
+                this.state.deleteTargetId = passwordId;
+                this.state.deleteTargetUserId = userId;
+                this.state.deleteTargetType = 'admin-password';
+                this.state.deletePromptTitle = '确认删除';
+                this.state.deletePromptText = '该操作将永久删除该密码条目，且无法恢复。';
+                this.state.showDeleteConfirm = true;
+                this.render();
+            }
+
+            async executeDeletePasswordAsAdmin() {
                 try {
-                    const res = await fetch(`${API_BASE}/api/admin/passwords/${passwordId}`, {
+                    const res = await fetch(`${API_BASE}/api/admin/passwords/${this.state.deleteTargetId}`, {
                         method: 'DELETE',
                         headers: { 'Authorization': `Bearer ${this.state.token}` }
                     });
@@ -924,7 +943,7 @@
                         this.showToast('密码已删除', 'success');
                         // 如果在用户详情页，重新加载用户详情
                         if (this.state.selectedUserId) {
-                            await this.viewUserDetails(userId);
+                            await this.viewUserDetails(this.state.deleteTargetUserId);
                         } else {
                             await this.loadAdminPasswords();
                             this.render();
@@ -959,9 +978,62 @@
                 this.render();
             }
 
-            closeUserDetails() {
-                this.state.selectedUserId = null;
-                this.state.selectedUserDetails = null;
+            deleteUser(userId) {
+                if (!this.isAdmin()) return;
+                this.state.deleteTargetId = userId;
+                this.state.deleteTargetType = 'admin-user';
+                this.state.deletePromptTitle = '⚠️ 危险操作';
+                this.state.deletePromptText = '该操作将永久删除该用户及其所有密码数据，且无法恢复！';
+                this.state.showDeleteConfirm = true;
+                this.render();
+            }
+
+            async executeDeleteUser() {
+                try {
+                    const res = await fetch(`${API_BASE}/api/admin/users/${this.state.deleteTargetId}`, {
+                        method: 'DELETE',
+                        headers: { 'Authorization': `Bearer ${this.state.token}` }
+                    });
+                    if (res.ok) {
+                        this.showToast('用户已删除', 'success');
+                        this.state.selectedUserId = null;
+                        this.state.selectedUserDetails = null;
+                        await this.loadAdminUsers();
+                        this.render();
+                    } else {
+                        const error = await res.json();
+                        this.showToast('删除失败: ' + error.message, 'error');
+                    }
+                } catch (e) {
+                    this.showToast('删除用户失败', 'error');
+                }
+            }
+
+            async confirmDelete() {
+                this.state.showDeleteConfirm = false;
+                const targetType = this.state.deleteTargetType;
+                
+                if (targetType === 'password') {
+                    await this.executeDeletePassword();
+                } else if (targetType === 'admin-password') {
+                    await this.executeDeletePasswordAsAdmin();
+                } else if (targetType === 'user') {
+                    await this.executeDeleteUserPassword();
+                } else if (targetType === 'admin-user') {
+                    await this.executeDeleteUser();
+                }
+                
+                this.state.deleteTargetId = null;
+                this.state.deleteTargetUserId = null;
+                this.state.deleteTargetType = null;
+                this.render();
+            }
+
+            cancelDelete() {
+                this.state.showDeleteConfirm = false;
+                this.state.deleteTargetId = null;
+                this.state.deleteTargetUserId = null;
+                this.state.deleteTargetType = null;
                 this.render();
             }
 
