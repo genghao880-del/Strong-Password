@@ -474,7 +474,7 @@ router.post('/api/auth/register', async (request, env) => {
     // Create user
     const stmt = env.DB.prepare('INSERT INTO users (email, password_hash) VALUES (?, ?)')
     await stmt.bind(email, passwordHash).run()
-    const result = await env.DB.prepare('SELECT id, email FROM users WHERE email = ?').bind(email).first()
+    const result = await env.DB.prepare('SELECT id, email, is_admin FROM users WHERE email = ?').bind(email).first()
 
     const token = await generateToken(result.id, env)
 
@@ -526,7 +526,7 @@ router.post('/api/auth/login', async (request, env) => {
     if (!emailRegex.test(normalizedEmail)) {
       return addCors(new Response(JSON.stringify({ error: 'Invalid credentials' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
     }
-    const user = await env.DB.prepare('SELECT id, password_hash, two_factor_enabled FROM users WHERE email = ?').bind(normalizedEmail).first()
+    const user = await env.DB.prepare('SELECT id, password_hash, two_factor_enabled, is_admin FROM users WHERE email = ?').bind(normalizedEmail).first()
     if (!user) {
       recordFailure(lockKey); recordFailure(ipKey)
       return addCors(new Response(JSON.stringify({ error: 'Invalid credentials' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
@@ -546,7 +546,7 @@ router.post('/api/auth/login', async (request, env) => {
     }
     const token = await generateToken(user.id, env)
     clearFailures(lockKey); clearFailures(ipKey)
-    return addCors(new Response(JSON.stringify({ user: { id: user.id, email: normalizedEmail }, token }), { status: 200, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    return addCors(new Response(JSON.stringify({ user: { id: user.id, email: normalizedEmail, is_admin: user.is_admin || 0 }, token }), { status: 200, headers: { 'Content-Type': 'application/json' } }), request, null, env)
   } catch (e) {
     return addCors(new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }), request, null, env)
   }
@@ -597,12 +597,12 @@ router.post('/api/auth/2fa/verify', async (request, env) => {
     if (!tempToken || !code) return addCors(new Response(JSON.stringify({ error: 'tempToken and code required' }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request, null, env)
     const decoded = await decodeToken(tempToken, env)
     if (!decoded || decoded.twofa !== 'pending') return addCors(new Response(JSON.stringify({ error: 'Invalid token' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
-    const user = await env.DB.prepare('SELECT id, email, two_factor_secret, two_factor_enabled FROM users WHERE id = ?').bind(decoded.userId).first()
+    const user = await env.DB.prepare('SELECT id, email, two_factor_secret, two_factor_enabled, is_admin FROM users WHERE id = ?').bind(decoded.userId).first()
     if (!user || !user.two_factor_enabled || !user.two_factor_secret) return addCors(new Response(JSON.stringify({ error: '2FA not enabled' }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request, null, env)
     const ok = await verifyTOTP(user.two_factor_secret, code)
     if (!ok) return addCors(new Response(JSON.stringify({ error: 'Invalid code' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
     const fullToken = await generateToken(user.id, env)
-    return addCors(new Response(JSON.stringify({ user: { id: user.id, email: user.email }, token: fullToken }), { status: 200, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    return addCors(new Response(JSON.stringify({ user: { id: user.id, email: user.email, is_admin: user.is_admin || 0 }, token: fullToken }), { status: 200, headers: { 'Content-Type': 'application/json' } }), request, null, env)
   } catch (e) {
     return addCors(new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }), request, null, env)
   }
@@ -779,7 +779,7 @@ router.post('/api/auth/2fa/recovery/verify', async (request, env) => {
     if (!tempToken || !recoveryCode) return addCors(new Response(JSON.stringify({ error: 'tempToken and recoveryCode required' }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request, null, env)
     const decoded = decodeToken(tempToken)
     if (!decoded || decoded.twofa !== 'pending') return addCors(new Response(JSON.stringify({ error: 'Invalid token' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
-    const user = await env.DB.prepare('SELECT id, email, two_factor_enabled FROM users WHERE id = ?').bind(decoded.userId).first()
+    const user = await env.DB.prepare('SELECT id, email, two_factor_enabled, is_admin FROM users WHERE id = ?').bind(decoded.userId).first()
     if (!user || !user.two_factor_enabled) return addCors(new Response(JSON.stringify({ error: '2FA not enabled' }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request, null, env)
     const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(recoveryCode.toUpperCase()))
     const hash = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2,'0')).join('')
@@ -787,7 +787,7 @@ router.post('/api/auth/2fa/recovery/verify', async (request, env) => {
     if (!rec || rec.used) return addCors(new Response(JSON.stringify({ error: 'Invalid code' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
     await env.DB.prepare('UPDATE recovery_codes SET used = 1 WHERE id = ?').bind(rec.id).run()
     const fullToken = await generateToken(user.id, env)
-    return addCors(new Response(JSON.stringify({ user: { id: user.id, email: user.email }, token: fullToken }), { status: 200, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    return addCors(new Response(JSON.stringify({ user: { id: user.id, email: user.email, is_admin: user.is_admin || 0 }, token: fullToken }), { status: 200, headers: { 'Content-Type': 'application/json' } }), request, null, env)
   } catch (e) {
     return addCors(new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }), request, null, env)
   }
