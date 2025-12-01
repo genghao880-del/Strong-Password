@@ -793,6 +793,211 @@ router.post('/api/auth/2fa/recovery/verify', async (request, env) => {
   }
 })
 
+// ==================== Admin Routes ====================
+
+// Helper: verify admin from token
+async function verifyAdmin(request, env) {
+  try {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) return null
+    const token = authHeader.substring(7)
+    const decoded = await decodeToken(token, env)
+    if (!decoded || !decoded.userId) return null
+    const user = await env.DB.prepare('SELECT id, email, is_admin FROM users WHERE id = ?').bind(decoded.userId).first()
+    if (!user || user.is_admin !== 1) return null
+    return user
+  } catch (e) {
+    return null
+  }
+}
+
+// GET system statistics (admin only)
+router.get('/api/admin/stats', async (request, env) => {
+  try {
+    await ensureMigration(env)
+    const admin = await verifyAdmin(request, env)
+    if (!admin) return addCors(new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    
+    const userCount = await env.DB.prepare('SELECT COUNT(*) as count FROM users').first()
+    const adminCount = await env.DB.prepare('SELECT COUNT(*) as count FROM users WHERE is_admin = 1').first()
+    const passwordCount = await env.DB.prepare('SELECT COUNT(*) as count FROM passwords').first()
+    const twoFAEnabled = await env.DB.prepare('SELECT COUNT(*) as count FROM users WHERE two_factor_enabled = 1').first()
+    
+    return addCors(new Response(JSON.stringify({
+      total_users: userCount.count,
+      total_admins: adminCount.count,
+      total_passwords: passwordCount.count,
+      users_with_2fa: twoFAEnabled.count
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+  } catch (e) {
+    return addCors(new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+  }
+})
+
+// GET all users (admin only)
+router.get('/api/admin/users', async (request, env) => {
+  try {
+    await ensureMigration(env)
+    const admin = await verifyAdmin(request, env)
+    if (!admin) return addCors(new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    
+    const stmt = env.DB.prepare(`
+      SELECT 
+        u.id, 
+        u.email, 
+        u.is_admin, 
+        u.two_factor_enabled,
+        u.created_at,
+        COUNT(DISTINCT p.id) as password_count
+      FROM users u
+      LEFT JOIN passwords p ON u.id = p.user_id
+      GROUP BY u.id
+      ORDER BY u.created_at DESC
+    `)
+    const results = await stmt.all()
+    return addCors(new Response(JSON.stringify(results.results), { status: 200, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+  } catch (e) {
+    return addCors(new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+  }
+})
+
+// GET user details (admin only)
+router.get('/api/admin/users/:id', async (request, env) => {
+  try {
+    await ensureMigration(env)
+    const admin = await verifyAdmin(request, env)
+    if (!admin) return addCors(new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    
+    const userId = request.params.id
+    const userStmt = env.DB.prepare('SELECT id, email, is_admin, two_factor_enabled, created_at FROM users WHERE id = ?')
+    const user = await userStmt.bind(userId).first()
+    
+    if (!user) return addCors(new Response(JSON.stringify({ error: 'User not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    
+    const passwordsStmt = env.DB.prepare('SELECT id, website, username, created_at, tags FROM passwords WHERE user_id = ? ORDER BY created_at DESC')
+    const passwords = await passwordsStmt.bind(userId).all()
+    
+    return addCors(new Response(JSON.stringify({ user, passwords: passwords.results }), { status: 200, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+  } catch (e) {
+    return addCors(new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+  }
+})
+
+// DELETE user (admin only)
+router.delete('/api/admin/users/:id', async (request, env) => {
+  try {
+    await ensureMigration(env)
+    const admin = await verifyAdmin(request, env)
+    if (!admin) return addCors(new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    
+    const userId = request.params.id
+    
+    // Prevent admin from deleting themselves
+    if (admin.id === parseInt(userId)) {
+      return addCors(new Response(JSON.stringify({ error: 'Cannot delete your own account' }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    }
+    
+    // Delete user's passwords first
+    await env.DB.prepare('DELETE FROM passwords WHERE user_id = ?').bind(userId).run()
+    
+    // Delete user's recovery codes
+    await env.DB.prepare('DELETE FROM recovery_codes WHERE user_id = ?').bind(userId).run()
+    
+    // Delete user
+    const result = await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(userId).run()
+    
+    if (!result.success) {
+      return addCors(new Response(JSON.stringify({ error: 'User not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    }
+    
+    return addCors(new Response(JSON.stringify({ success: true, message: 'User deleted successfully' }), { status: 200, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+  } catch (e) {
+    return addCors(new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+  }
+})
+
+// UPDATE user admin status (admin only)
+router.patch('/api/admin/users/:id/admin', async (request, env) => {
+  try {
+    await ensureMigration(env)
+    const admin = await verifyAdmin(request, env)
+    if (!admin) return addCors(new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    
+    const userId = request.params.id
+    const { is_admin } = await request.json()
+    
+    // Prevent admin from removing their own admin status
+    if (admin.id === parseInt(userId) && is_admin === 0) {
+      return addCors(new Response(JSON.stringify({ error: 'Cannot remove your own admin privileges' }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    }
+    
+    const stmt = env.DB.prepare('UPDATE users SET is_admin = ? WHERE id = ?')
+    const result = await stmt.bind(is_admin ? 1 : 0, userId).run()
+    
+    if (!result.success) {
+      return addCors(new Response(JSON.stringify({ error: 'User not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    }
+    
+    return addCors(new Response(JSON.stringify({ success: true, message: 'User admin status updated' }), { status: 200, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+  } catch (e) {
+    return addCors(new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+  }
+})
+
+// GET all passwords from all users (admin only)
+router.get('/api/admin/passwords', async (request, env) => {
+  try {
+    await ensureMigration(env)
+    const admin = await verifyAdmin(request, env)
+    if (!admin) return addCors(new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    
+    const stmt = env.DB.prepare(`
+      SELECT 
+        p.id,
+        p.website,
+        p.username,
+        p.created_at,
+        p.tags,
+        u.email as user_email,
+        u.id as user_id
+      FROM passwords p
+      JOIN users u ON p.user_id = u.id
+      ORDER BY p.created_at DESC
+    `)
+    const results = await stmt.all()
+    return addCors(new Response(JSON.stringify(results.results), { status: 200, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+  } catch (e) {
+    return addCors(new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+  }
+})
+
+// DELETE password (admin only)
+router.delete('/api/admin/passwords/:id', async (request, env) => {
+  try {
+    await ensureMigration(env)
+    const admin = await verifyAdmin(request, env)
+    if (!admin) return addCors(new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    
+    const passwordId = parseInt(request.params.id)
+    if (!passwordId || isNaN(passwordId)) {
+      return addCors(new Response(JSON.stringify({ error: 'Invalid password ID' }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    }
+    
+    // Check if password exists
+    const password = await env.DB.prepare('SELECT id FROM passwords WHERE id = ?').bind(passwordId).first()
+    if (!password) {
+      return addCors(new Response(JSON.stringify({ error: 'Password not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    }
+    
+    // Delete the password
+    await env.DB.prepare('DELETE FROM passwords WHERE id = ?').bind(passwordId).run()
+    
+    return addCors(new Response(JSON.stringify({ success: true, message: 'Password deleted' }), { status: 200, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+  } catch (e) {
+    return addCors(new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+  }
+})
+
 // Fallback
 router.all('*', (request, env) => addCors(new Response('Not Found', { status: 404 }), request, null, env))
 

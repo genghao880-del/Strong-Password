@@ -911,6 +911,39 @@
                 }
             }
 
+            async deletePasswordAsAdmin(passwordId, userId) {
+                if (!this.isAdmin()) return;
+                if (!confirm('确定要删除该密码吗？此操作不可逆！')) return;
+                
+                try {
+                    const res = await fetch(`${API_BASE}/api/admin/passwords/${passwordId}`, {
+                        method: 'DELETE',
+                        headers: { 'Authorization': `Bearer ${this.state.token}` }
+                    });
+                    if (res.ok) {
+                        this.showToast('密码已删除', 'success');
+                        // 如果在用户详情页，重新加载用户详情
+                        if (this.state.selectedUserId) {
+                            await this.viewUserDetails(userId);
+                        } else {
+                            await this.loadAdminPasswords();
+                            this.render();
+                        }
+                    } else {
+                        const error = await res.json();
+                        this.showToast('删除失败: ' + error.message, 'error');
+                    }
+                } catch (e) {
+                    this.showToast('删除密码失败', 'error');
+                }
+            }
+
+            closeUserDetails() {
+                this.state.selectedUserId = null;
+                this.state.selectedUserDetails = null;
+                this.render();
+            }
+
             switchAdminView(view) {
                 this.state.adminView = view;
                 this.state.selectedUserId = null;
@@ -1018,8 +1051,8 @@
 
             renderAdminScreen() {
                 return `
-                    <div class="min-h-screen bg-gradient-to-br from-[#0F1E2E] via-slate-900 to-[#0F1E2E] p-6">
-                        <div class="max-w-7xl mx-auto">
+                    <div class="min-h-screen bg-gradient-to-br from-[#0F1E2E] via-slate-900 to-[#0F1E2E] p-4">
+                        <div class="max-w-6xl mx-auto">
                             <!-- Header -->
                             <div class="flex justify-between items-center mb-6">
                                 <div>
@@ -1061,47 +1094,47 @@
             renderAdminDashboard() {
                 const stats = this.state.adminStats;
                 return `
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                        <div class="bg-gradient-to-br from-blue-600 to-blue-800 rounded-lg p-6 shadow-xl">
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div class="bg-gradient-to-br from-blue-600 to-blue-800 rounded-lg p-4 shadow-xl">
                             <div class="flex items-center justify-between">
                                 <div>
                                     <p class="text-blue-200 text-sm font-medium">总用户数</p>
-                                    <p class="text-white text-4xl font-bold mt-2">${stats.total_users || 0}</p>
+                                    <p class="text-white text-3xl font-bold mt-1">${stats.total_users || 0}</p>
                                 </div>
-                                <div class="text-5xl">👥</div>
+                                <div class="text-4xl">👥</div>
                             </div>
                         </div>
-                        <div class="bg-gradient-to-br from-purple-600 to-purple-800 rounded-lg p-6 shadow-xl">
+                        <div class="bg-gradient-to-br from-purple-600 to-purple-800 rounded-lg p-4 shadow-xl">
                             <div class="flex items-center justify-between">
                                 <div>
                                     <p class="text-purple-200 text-sm font-medium">管理员数</p>
-                                    <p class="text-white text-4xl font-bold mt-2">${stats.total_admins || 0}</p>
+                                    <p class="text-white text-3xl font-bold mt-1">${stats.total_admins || 0}</p>
                                 </div>
-                                <div class="text-5xl">👑</div>
+                                <div class="text-4xl">👑</div>
                             </div>
                         </div>
-                        <div class="bg-gradient-to-br from-green-600 to-green-800 rounded-lg p-6 shadow-xl">
+                        <div class="bg-gradient-to-br from-green-600 to-green-800 rounded-lg p-4 shadow-xl">
                             <div class="flex items-center justify-between">
                                 <div>
                                     <p class="text-green-200 text-sm font-medium">总密码数</p>
-                                    <p class="text-white text-4xl font-bold mt-2">${stats.total_passwords || 0}</p>
+                                    <p class="text-white text-3xl font-bold mt-1">${stats.total_passwords || 0}</p>
                                 </div>
-                                <div class="text-5xl">🔑</div>
+                                <div class="text-4xl">🔑</div>
                             </div>
                         </div>
-                        <div class="bg-gradient-to-br from-orange-600 to-orange-800 rounded-lg p-6 shadow-xl">
+                        <div class="bg-gradient-to-br from-orange-600 to-orange-800 rounded-lg p-4 shadow-xl">
                             <div class="flex items-center justify-between">
                                 <div>
                                     <p class="text-orange-200 text-sm font-medium">启用2FA用户</p>
-                                    <p class="text-white text-4xl font-bold mt-2">${stats.users_with_2fa || 0}</p>
+                                    <p class="text-white text-3xl font-bold mt-1">${stats.users_with_2fa || 0}</p>
                                 </div>
-                                <div class="text-5xl">🔒</div>
+                                <div class="text-4xl">🔒</div>
                             </div>
                         </div>
                     </div>
-                    <div class="mt-6 bg-slate-800 border border-purple-500 rounded-lg p-6">
-                        <h2 class="text-2xl font-bold text-white mb-4">📈 系统概览</h2>
-                        <div class="space-y-3 text-gray-300">
+                    <div class="mt-4 bg-slate-800 border border-purple-500 rounded-lg p-4">
+                        <h2 class="text-xl font-bold text-white mb-3">📈 系统概览</h2>
+                        <div class="space-y-2 text-gray-300 text-sm">
                             <p>• 平均每用户密码数: <span class="text-[#F48120] font-bold">${stats.total_users > 0 ? (stats.total_passwords / stats.total_users).toFixed(1) : 0}</span></p>
                             <p>• 2FA 启用率: <span class="text-[#F48120] font-bold">${stats.total_users > 0 ? ((stats.users_with_2fa / stats.total_users) * 100).toFixed(1) : 0}%</span></p>
                             <p>• 系统状态: <span class="text-green-400 font-bold">✅ 正常运行</span></p>
@@ -1199,6 +1232,9 @@
                                                     ${p.tags ? `<p class='text-xs text-gray-400 mt-1'>🏷️ ${p.tags}</p>` : ''}
                                                     <p class="text-xs text-gray-500 mt-2">📅 ${new Date(p.created_at).toLocaleString()}</p>
                                                 </div>
+                                                <button onclick="manager.deletePasswordAsAdmin(${p.id}, ${user.id})" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm" title="删除密码">
+                                                    🗑️
+                                                </button>
                                             </div>
                                         </div>
                                     `).join('')}
@@ -1223,6 +1259,7 @@
                                         <th class="text-left py-3 px-4 text-gray-400 font-semibold">所属用户</th>
                                         <th class="text-left py-3 px-4 text-gray-400 font-semibold">标签</th>
                                         <th class="text-left py-3 px-4 text-gray-400 font-semibold">创建时间</th>
+                                        <th class="text-left py-3 px-4 text-gray-400 font-semibold">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -1232,11 +1269,16 @@
                                             <td class="py-3 px-4 text-purple-300 font-semibold">${p.website}</td>
                                             <td class="py-3 px-4 text-blue-300 font-mono text-sm">${p.username || '-'}</td>
                                             <td class="py-3 px-4">
-                                                <div class="text-white font-mono text-sm">${p.user_email}</div>
+                                                <button onclick="manager.viewUserDetails(${p.user_id})" class="text-white hover:text-blue-400 font-mono text-sm underline">${p.user_email}</button>
                                                 <div class="text-xs text-gray-500">ID: ${p.user_id}</div>
                                             </td>
                                             <td class="py-3 px-4 text-gray-400 text-sm">${p.tags || '-'}</td>
                                             <td class="py-3 px-4 text-gray-400 text-sm">${new Date(p.created_at).toLocaleDateString()}</td>
+                                            <td class="py-3 px-4">
+                                                <button onclick="manager.deletePasswordAsAdmin(${p.id}, ${p.user_id})" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm" title="删除密码">
+                                                    🗑️
+                                                </button>
+                                            </td>
                                         </tr>
                                     `).join('')}
                                 </tbody>
