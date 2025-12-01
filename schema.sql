@@ -9,7 +9,9 @@ CREATE TABLE users (
   email TEXT NOT NULL,
   password_hash TEXT NOT NULL,
   two_factor_enabled INTEGER DEFAULT 0,
-  two_factor_secret TEXT
+  two_factor_secret TEXT,
+  is_admin INTEGER DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 密码表 (Passwords Table)
@@ -39,3 +41,5 @@ CREATE TABLE recovery_codes (
 -- 索引 (Indexes)
 CREATE INDEX idx_passwords_user_id ON passwords(user_id);
 CREATE INDEX idx_recovery_user ON recovery_codes(user_id);
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_admin ON users(is_admin);

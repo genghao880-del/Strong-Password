@@ -212,6 +212,12 @@
                     ,clientInfo: this.detectClient()
                     ,lastSaved: { website: '', username: '', password: '' }
                     ,editingOriginal: { website: '', username: '', password: '' }
+                    ,adminView: 'dashboard' // dashboard | users | passwords | stats
+                    ,adminUsers: []
+                    ,adminStats: {}
+                    ,adminPasswords: []
+                    ,selectedUserId: null
+                    ,selectedUserDetails: null
                 };
                 this.toastTimer = null;
                 this.init();
@@ -793,6 +799,140 @@
                 this.render();
             }
 
+            // ==================== Admin Methods ====================
+            
+            isAdmin() {
+                return this.state.user && this.state.user.is_admin === 1;
+            }
+
+            async loadAdminStats() {
+                if (!this.isAdmin()) return;
+                try {
+                    const res = await fetch(`${API_BASE}/api/admin/stats`, {
+                        headers: { 'Authorization': `Bearer ${this.state.token}` }
+                    });
+                    if (res.ok) {
+                        this.state.adminStats = await res.json();
+                    }
+                } catch (e) {
+                    this.showToast('加载统计失败', 'error');
+                }
+            }
+
+            async loadAdminUsers() {
+                if (!this.isAdmin()) return;
+                try {
+                    const res = await fetch(`${API_BASE}/api/admin/users`, {
+                        headers: { 'Authorization': `Bearer ${this.state.token}` }
+                    });
+                    if (res.ok) {
+                        this.state.adminUsers = await res.json();
+                    }
+                } catch (e) {
+                    this.showToast('加载用户失败', 'error');
+                }
+            }
+
+            async loadAdminPasswords() {
+                if (!this.isAdmin()) return;
+                try {
+                    const res = await fetch(`${API_BASE}/api/admin/passwords`, {
+                        headers: { 'Authorization': `Bearer ${this.state.token}` }
+                    });
+                    if (res.ok) {
+                        this.state.adminPasswords = await res.json();
+                    }
+                } catch (e) {
+                    this.showToast('加载所有密码失败', 'error');
+                }
+            }
+
+            async viewUserDetails(userId) {
+                if (!this.isAdmin()) return;
+                try {
+                    const res = await fetch(`${API_BASE}/api/admin/users/${userId}`, {
+                        headers: { 'Authorization': `Bearer ${this.state.token}` }
+                    });
+                    if (res.ok) {
+                        this.state.selectedUserDetails = await res.json();
+                        this.state.selectedUserId = userId;
+                        this.render();
+                    }
+                } catch (e) {
+                    this.showToast('加载用户详情失败', 'error');
+                }
+            }
+
+            async deleteUser(userId) {
+                if (!this.isAdmin()) return;
+                if (!confirm('确定要删除该用户及其所有数据吗？此操作不可逆！')) return;
+                
+                try {
+                    const res = await fetch(`${API_BASE}/api/admin/users/${userId}`, {
+                        method: 'DELETE',
+                        headers: { 'Authorization': `Bearer ${this.state.token}` }
+                    });
+                    if (res.ok) {
+                        this.showToast('用户已删除', 'success');
+                        this.state.selectedUserId = null;
+                        this.state.selectedUserDetails = null;
+                        await this.loadAdminUsers();
+                        this.render();
+                    } else {
+                        const error = await res.json();
+                        this.showToast('删除失败: ' + error.message, 'error');
+                    }
+                } catch (e) {
+                    this.showToast('删除用户失败', 'error');
+                }
+            }
+
+            async toggleUserAdmin(userId, currentStatus) {
+                if (!this.isAdmin()) return;
+                try {
+                    const res = await fetch(`${API_BASE}/api/admin/users/${userId}/admin`, {
+                        method: 'PATCH',
+                        headers: { 
+                            'Authorization': `Bearer ${this.state.token}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ is_admin: currentStatus === 1 ? 0 : 1 })
+                    });
+                    if (res.ok) {
+                        this.showToast('管理员权限已更新', 'success');
+                        await this.loadAdminUsers();
+                        this.render();
+                    } else {
+                        const error = await res.json();
+                        this.showToast('更新失败: ' + error.message, 'error');
+                    }
+                } catch (e) {
+                    this.showToast('更新失败', 'error');
+                }
+            }
+
+            switchAdminView(view) {
+                this.state.adminView = view;
+                this.state.selectedUserId = null;
+                this.state.selectedUserDetails = null;
+                
+                if (view === 'dashboard') {
+                    this.loadAdminStats();
+                } else if (view === 'users') {
+                    this.loadAdminUsers();
+                } else if (view === 'passwords') {
+                    this.loadAdminPasswords();
+                }
+                this.render();
+            }
+
+            closeUserDetails() {
+                this.state.selectedUserId = null;
+                this.state.selectedUserDetails = null;
+                this.render();
+            }
+
+
             render() {
                 const app = document.getElementById('app');
                 
@@ -800,6 +940,8 @@
                     app.innerHTML = this.renderLoginScreen();
                 } else if (this.state.screen === 'register') {
                     app.innerHTML = this.renderRegisterScreen();
+                } else if (this.state.screen === 'admin') {
+                    app.innerHTML = this.renderAdminScreen();
                 } else {
                     app.innerHTML = this.renderAppScreen();
                 }
@@ -874,6 +1016,236 @@
                                 }
             }
 
+            renderAdminScreen() {
+                return `
+                    <div class="min-h-screen bg-gradient-to-br from-[#0F1E2E] via-slate-900 to-[#0F1E2E] p-6">
+                        <div class="max-w-7xl mx-auto">
+                            <!-- Header -->
+                            <div class="flex justify-between items-center mb-6">
+                                <div>
+                                    <h1 class="text-4xl font-bold text-white mb-1">👑 管理员面板</h1>
+                                    <p class="text-gray-400 text-sm">欢迎，管理员 <span class="text-[#F48120]">${this.state.user.email}</span></p>
+                                </div>
+                                <div class="flex gap-2">
+                                    <button onclick="manager.state.screen='app'; manager.render()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition">
+                                        🔙 返回用户界面
+                                    </button>
+                                    <button onclick="manager.logout()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition">
+                                        🚪 退出
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Navigation Tabs -->
+                            <div class="flex gap-2 mb-6 border-b border-gray-700">
+                                <button onclick="manager.switchAdminView('dashboard')" class="px-6 py-3 font-semibold ${this.state.adminView === 'dashboard' ? 'text-[#F48120] border-b-2 border-[#F48120]' : 'text-gray-400 hover:text-gray-200'}">
+                                    📊 仪表板
+                                </button>
+                                <button onclick="manager.switchAdminView('users')" class="px-6 py-3 font-semibold ${this.state.adminView === 'users' ? 'text-[#F48120] border-b-2 border-[#F48120]' : 'text-gray-400 hover:text-gray-200'}">
+                                    👥 用户管理
+                                </button>
+                                <button onclick="manager.switchAdminView('passwords')" class="px-6 py-3 font-semibold ${this.state.adminView === 'passwords' ? 'text-[#F48120] border-b-2 border-[#F48120]' : 'text-gray-400 hover:text-gray-200'}">
+                                    🔑 密码总览
+                                </button>
+                            </div>
+
+                            <!-- Content Area -->
+                            ${this.state.adminView === 'dashboard' ? this.renderAdminDashboard() : ''}
+                            ${this.state.adminView === 'users' ? this.renderAdminUsers() : ''}
+                            ${this.state.adminView === 'passwords' ? this.renderAdminPasswords() : ''}
+                        </div>
+                    </div>
+                `;
+            }
+
+            renderAdminDashboard() {
+                const stats = this.state.adminStats;
+                return `
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <div class="bg-gradient-to-br from-blue-600 to-blue-800 rounded-lg p-6 shadow-xl">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-blue-200 text-sm font-medium">总用户数</p>
+                                    <p class="text-white text-4xl font-bold mt-2">${stats.total_users || 0}</p>
+                                </div>
+                                <div class="text-5xl">👥</div>
+                            </div>
+                        </div>
+                        <div class="bg-gradient-to-br from-purple-600 to-purple-800 rounded-lg p-6 shadow-xl">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-purple-200 text-sm font-medium">管理员数</p>
+                                    <p class="text-white text-4xl font-bold mt-2">${stats.total_admins || 0}</p>
+                                </div>
+                                <div class="text-5xl">👑</div>
+                            </div>
+                        </div>
+                        <div class="bg-gradient-to-br from-green-600 to-green-800 rounded-lg p-6 shadow-xl">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-green-200 text-sm font-medium">总密码数</p>
+                                    <p class="text-white text-4xl font-bold mt-2">${stats.total_passwords || 0}</p>
+                                </div>
+                                <div class="text-5xl">🔑</div>
+                            </div>
+                        </div>
+                        <div class="bg-gradient-to-br from-orange-600 to-orange-800 rounded-lg p-6 shadow-xl">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <p class="text-orange-200 text-sm font-medium">启用2FA用户</p>
+                                    <p class="text-white text-4xl font-bold mt-2">${stats.users_with_2fa || 0}</p>
+                                </div>
+                                <div class="text-5xl">🔒</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-6 bg-slate-800 border border-purple-500 rounded-lg p-6">
+                        <h2 class="text-2xl font-bold text-white mb-4">📈 系统概览</h2>
+                        <div class="space-y-3 text-gray-300">
+                            <p>• 平均每用户密码数: <span class="text-[#F48120] font-bold">${stats.total_users > 0 ? (stats.total_passwords / stats.total_users).toFixed(1) : 0}</span></p>
+                            <p>• 2FA 启用率: <span class="text-[#F48120] font-bold">${stats.total_users > 0 ? ((stats.users_with_2fa / stats.total_users) * 100).toFixed(1) : 0}%</span></p>
+                            <p>• 系统状态: <span class="text-green-400 font-bold">✅ 正常运行</span></p>
+                        </div>
+                    </div>
+                `;
+            }
+
+            renderAdminUsers() {
+                if (this.state.selectedUserId && this.state.selectedUserDetails) {
+                    return this.renderUserDetails();
+                }
+
+                return `
+                    <div class="bg-slate-800 border border-purple-500 rounded-lg p-6 shadow-xl">
+                        <h2 class="text-2xl font-bold text-white mb-6">👥 用户列表 (${this.state.adminUsers.length})</h2>
+                        <div class="overflow-x-auto">
+                            <table class="w-full">
+                                <thead>
+                                    <tr class="border-b border-gray-700">
+                                        <th class="text-left py-3 px-4 text-gray-400 font-semibold">ID</th>
+                                        <th class="text-left py-3 px-4 text-gray-400 font-semibold">邮箱</th>
+                                        <th class="text-left py-3 px-4 text-gray-400 font-semibold">角色</th>
+                                        <th class="text-left py-3 px-4 text-gray-400 font-semibold">2FA</th>
+                                        <th class="text-left py-3 px-4 text-gray-400 font-semibold">密码数</th>
+                                        <th class="text-left py-3 px-4 text-gray-400 font-semibold">注册时间</th>
+                                        <th class="text-left py-3 px-4 text-gray-400 font-semibold">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${this.state.adminUsers.map(user => `
+                                        <tr class="border-b border-gray-700 hover:bg-slate-700 transition">
+                                            <td class="py-3 px-4 text-white">${user.id}</td>
+                                            <td class="py-3 px-4 text-white font-mono text-sm">${user.email}</td>
+                                            <td class="py-3 px-4">
+                                                <span class="px-2 py-1 rounded text-xs font-bold ${user.is_admin ? 'bg-orange-600 text-white' : 'bg-gray-600 text-gray-200'}">
+                                                    ${user.is_admin ? '👑 管理员' : '👤 用户'}
+                                                </span>
+                                            </td>
+                                            <td class="py-3 px-4">${user.two_factor_enabled ? '✅' : '❌'}</td>
+                                            <td class="py-3 px-4 text-white">${user.password_count || 0}</td>
+                                            <td class="py-3 px-4 text-gray-400 text-sm">${new Date(user.created_at).toLocaleDateString()}</td>
+                                            <td class="py-3 px-4">
+                                                <div class="flex gap-2">
+                                                    <button onclick="manager.viewUserDetails(${user.id})" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm" title="查看详情">
+                                                        👁️
+                                                    </button>
+                                                    <button onclick="manager.toggleUserAdmin(${user.id}, ${user.is_admin})" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded text-sm" title="${user.is_admin ? '撤销管理员' : '设为管理员'}">
+                                                        ${user.is_admin ? '👤' : '👑'}
+                                                    </button>
+                                                    <button onclick="manager.deleteUser(${user.id})" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm" title="删除用户" ${user.id === this.state.user.id ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : ''}>
+                                                        🗑️
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            }
+
+            renderUserDetails() {
+                const { user, passwords } = this.state.selectedUserDetails;
+                return `
+                    <div class="space-y-6">
+                        <button onclick="manager.closeUserDetails()" class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition">
+                            ← 返回用户列表
+                        </button>
+                        
+                        <div class="bg-slate-800 border border-purple-500 rounded-lg p-6 shadow-xl">
+                            <h2 class="text-2xl font-bold text-white mb-4">👤 用户详情</h2>
+                            <div class="grid grid-cols-2 gap-4 text-gray-300">
+                                <div><span class="text-gray-500">ID:</span> <span class="text-white font-bold">${user.id}</span></div>
+                                <div><span class="text-gray-500">邮箱:</span> <span class="text-white font-mono">${user.email}</span></div>
+                                <div><span class="text-gray-500">角色:</span> <span class="${user.is_admin ? 'text-orange-400' : 'text-blue-400'} font-bold">${user.is_admin ? '👑 管理员' : '👤 普通用户'}</span></div>
+                                <div><span class="text-gray-500">2FA:</span> <span class="${user.two_factor_enabled ? 'text-green-400' : 'text-gray-400'}">${user.two_factor_enabled ? '✅ 已启用' : '❌ 未启用'}</span></div>
+                                <div><span class="text-gray-500">注册时间:</span> <span class="text-white">${new Date(user.created_at).toLocaleString()}</span></div>
+                                <div><span class="text-gray-500">密码数量:</span> <span class="text-[#F48120] font-bold">${passwords.length}</span></div>
+                            </div>
+                        </div>
+
+                        <div class="bg-slate-800 border border-purple-500 rounded-lg p-6 shadow-xl">
+                            <h2 class="text-2xl font-bold text-white mb-4">🔑 用户密码列表 (${passwords.length})</h2>
+                            ${passwords.length === 0 ? '<p class="text-gray-400 text-center py-8">该用户暂无保存的密码</p>' : `
+                                <div class="space-y-3 max-h-96 overflow-y-auto">
+                                    ${passwords.map(p => `
+                                        <div class="bg-slate-700 p-4 rounded-lg border border-purple-500">
+                                            <div class="flex justify-between items-start">
+                                                <div class="flex-1">
+                                                    <p class="font-bold text-purple-300 text-lg">${p.website}</p>
+                                                    ${p.username ? `<p class='text-sm text-blue-300 mt-1'>👤 ${p.username}</p>` : ''}
+                                                    ${p.tags ? `<p class='text-xs text-gray-400 mt-1'>🏷️ ${p.tags}</p>` : ''}
+                                                    <p class="text-xs text-gray-500 mt-2">📅 ${new Date(p.created_at).toLocaleString()}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            `}
+                        </div>
+                    </div>
+                `;
+            }
+
+            renderAdminPasswords() {
+                return `
+                    <div class="bg-slate-800 border border-purple-500 rounded-lg p-6 shadow-xl">
+                        <h2 class="text-2xl font-bold text-white mb-6">🔑 所有密码总览 (${this.state.adminPasswords.length})</h2>
+                        <div class="overflow-x-auto">
+                            <table class="w-full">
+                                <thead>
+                                    <tr class="border-b border-gray-700">
+                                        <th class="text-left py-3 px-4 text-gray-400 font-semibold">ID</th>
+                                        <th class="text-left py-3 px-4 text-gray-400 font-semibold">网站</th>
+                                        <th class="text-left py-3 px-4 text-gray-400 font-semibold">用户名</th>
+                                        <th class="text-left py-3 px-4 text-gray-400 font-semibold">所属用户</th>
+                                        <th class="text-left py-3 px-4 text-gray-400 font-semibold">标签</th>
+                                        <th class="text-left py-3 px-4 text-gray-400 font-semibold">创建时间</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${this.state.adminPasswords.map(p => `
+                                        <tr class="border-b border-gray-700 hover:bg-slate-700 transition">
+                                            <td class="py-3 px-4 text-white">${p.id}</td>
+                                            <td class="py-3 px-4 text-purple-300 font-semibold">${p.website}</td>
+                                            <td class="py-3 px-4 text-blue-300 font-mono text-sm">${p.username || '-'}</td>
+                                            <td class="py-3 px-4">
+                                                <div class="text-white font-mono text-sm">${p.user_email}</div>
+                                                <div class="text-xs text-gray-500">ID: ${p.user_id}</div>
+                                            </td>
+                                            <td class="py-3 px-4 text-gray-400 text-sm">${p.tags || '-'}</td>
+                                            <td class="py-3 px-4 text-gray-400 text-sm">${new Date(p.created_at).toLocaleDateString()}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            }
+
             renderLoginScreen() {
                 return `
                     <div class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center p-6">
@@ -937,6 +1309,11 @@
                                     <p class="text-gray-500 text-[10px] mt-0.5">${this.state.clientInfo.isMobile ? '📱' : '💻'} ${this.state.clientInfo.platform} · ${this.state.clientInfo.browser}</p>
                                 </div>
                                 <div class="flex flex-wrap gap-2">
+                                    ${this.isAdmin() ? `
+                                        <button onclick="manager.state.screen='admin'; manager.switchAdminView('dashboard'); manager.render()" class="icon-btn btn-hover bg-gradient-to-r from-orange-600 to-yellow-600 hover:from-orange-700 hover:to-yellow-700 text-white py-2 px-3 rounded-lg transition font-bold" title="管理员面板">
+                                            👑
+                                        </button>
+                                    ` : ''}
                                     <button onclick="manager.toggleTheme()" class="icon-btn btn-hover bg-slate-700 hover:bg-slate-600 text-white py-2 px-3 rounded-lg transition" title="主题">
                                         ${this.state.theme === 'dark' ? '☀️' : '🌙'}
                                     </button>
