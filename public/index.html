@@ -766,7 +766,18 @@
                         this.showToast('恢复码验证成功 ✅','success');
                         this.render();
                     } else {
-                        this.showToast('恢复码无效','error');
+                        // 提供更详细的错误信息
+                        let errorMessage = '恢复码无效';
+                        if (data.error === 'Code belongs to another user') {
+                            errorMessage = '❌ 恢复码属于其他用户，无法用于当前账户登录';
+                        } else if (data.error === 'Code already used') {
+                            errorMessage = '❌ 恢复码已被使用，每个恢复码只能使用一次';
+                        } else if (data.error === 'Invalid code') {
+                            errorMessage = '❌ 恢复码无效，请检查输入是否正确';
+                        } else if (data.error) {
+                            errorMessage = `❌ ${data.error}`;
+                        }
+                        this.showToast(errorMessage, 'error');
                     }
                 } catch(e){
                     this.showToast('验证失败: '+e.message,'error');
