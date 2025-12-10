@@ -821,9 +821,9 @@
             }
 
             // 添加disable2FA函数实现
-            async disable2FA() {
+            PasswordManager.prototype.disable2FA = async function() {
                 if (!this.state.twoFACode) { 
-                    this.showToast('请输入验证码','error'); 
+                    this.showToast('请输入当前的TOTP验证码','error'); 
                     return; 
                 }
                 
@@ -852,7 +852,11 @@
                         this.showToast('二次验证已关闭 🔓','success');
                         this.render();
                     } else {
-                        this.showToast('关闭失败: ' + (data.error || '未知错误'),'error');
+                        let errorMessage = '关闭失败: ' + (data.error || '未知错误');
+                        if (data.error === 'Invalid TOTP code') {
+                            errorMessage = '验证码错误，请输入当前有效的TOTP验证码';
+                        }
+                        this.showToast(errorMessage, 'error');
                     }
                 } catch (e) {
                     this.showToast('关闭失败: ' + e.message,'error');
@@ -1226,6 +1230,14 @@
                                                     <input type='text' placeholder='6位验证码' class='w-full bg-slate-700 text-white p-2 rounded mb-3 text-center tracking-widest' oninput='manager.state.twoFACode = this.value' />
                                                     <div class='flex gap-2'>
                                                         <button onclick='manager.activate2FA()' class='flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded'>确认启用</button>
+                                                        <button onclick='manager.close2FAModal()' class='flex-1 bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 rounded'>取消</button>
+                                                    </div>`;
+                                        } else if (this.state.twoFAStage === 'disable') {
+                                                bodyHTML = `
+                                                    <p class='text-sm text-gray-300 mb-3'>要关闭二次验证，您需要验证您的身份。<br/>请在您的身份验证应用（如Google Authenticator）中查看当前的6位动态验证码，并输入到下方：</p>
+                                                    <input type='text' placeholder='6位动态验证码' class='w-full bg-slate-700 text-white p-2 rounded mb-3 text-center tracking-widest' oninput='manager.state.twoFACode = this.value' />
+                                                    <div class='flex gap-2'>
+                                                        <button onclick='manager.disable2FA()' class='flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded'>确认关闭</button>
                                                         <button onclick='manager.close2FAModal()' class='flex-1 bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 rounded'>取消</button>
                                                     </div>`;
                                         } else if (this.state.twoFAStage === 'verify') {

@@ -608,19 +608,32 @@ router.post('/api/auth/2fa/verify', async (request, env) => {
   }
 })
 
-// disable 2FA (requires current code)
+// disable 2FA (requires BOTH token and current TOTP code)
 router.post('/api/auth/2fa/disable', async (request, env) => {
   try {
     await ensureMigration(env)
     const userId = await getUserFromRequest(request, env)
     if (!userId) return addCors(new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    
     const { code } = await request.json()
-    if (!code) return addCors(new Response(JSON.stringify({ error: 'code required' }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request, null, env)
-    const user = await env.DB.prepare('SELECT two_factor_secret, two_factor_enabled FROM users WHERE id = ?').bind(userId).first()
-    if (!user.two_factor_enabled || !user.two_factor_secret) return addCors(new Response(JSON.stringify({ error: 'Not enabled' }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    if (!code) return addCors(new Response(JSON.stringify({ error: 'Current TOTP code required' }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    
+    const user = await env.DB.prepare('SELECT two_factor_secret, email FROM users WHERE id = ?').bind(userId).first()
+    if (!user || !user.two_factor_secret) return addCors(new Response(JSON.stringify({ error: '2FA not enabled' }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    
+    // Verify the TOTP code (critical security check)
     const ok = await verifyTOTP(user.two_factor_secret, code)
-    if (!ok) return addCors(new Response(JSON.stringify({ error: 'Invalid code' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    if (!ok) return addCors(new Response(JSON.stringify({ error: 'Invalid TOTP code' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    
+    // Disable 2FA
     await env.DB.prepare('UPDATE users SET two_factor_enabled = 0, two_factor_secret = NULL WHERE id = ?').bind(userId).run()
+    
+    // Log this critical action
+    const ip = request.headers.get('CF-Connecting-IP') || 'unknown'
+    console.log(`CRITICAL: 2FA disabled for user ${userId} from IP ${ip}`)
+    
+    // In a production environment, you would send an email notification here
+    
     return addCors(new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }), request, null, env)
   } catch (e) {
     return addCors(new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { 'Content-Type': 'application/json' } }), request, null, env)
