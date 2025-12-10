@@ -782,15 +782,49 @@ router.post('/api/auth/2fa/recovery/verify', async (request, env) => {
   try {
     await ensureMigration(env)
     const { tempToken, recoveryCode } = await request.json()
-    if (!tempToken || !recoveryCode) return addCors(new Response(JSON.stringify({ error: 'tempToken and recoveryCode required' }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    if (!tempToken || !recoveryCode) return addCors(newResponse(JSON.stringify({ error: 'tempToken and recoveryCode required' }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request, null, env)
     const decoded = decodeToken(tempToken)
     if (!decoded || decoded.twofa !== 'pending') return addCors(new Response(JSON.stringify({ error: 'Invalid token' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
     const user = await env.DB.prepare('SELECT id, email, two_factor_enabled, is_admin FROM users WHERE id = ?').bind(decoded.userId).first()
     if (!user || !user.two_factor_enabled) return addCors(new Response(JSON.stringify({ error: '2FA not enabled' }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request, null, env)
-    const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(recoveryCode.toUpperCase()))
+    
+    // 确保恢复码格式化为大写
+    const cleanRecoveryCode = recoveryCode.trim().toUpperCase();
+    const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(cleanRecoveryCode))
     const hash = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2,'0')).join('')
-    const rec = await env.DB.prepare('SELECT id, used FROM recovery_codes WHERE user_id = ? AND code_hash = ?').bind(user.id, hash).first()
-    if (!rec || rec.used) return addCors(new Response(JSON.stringify({ error: 'Invalid code' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    
+    // 查询恢复码，不再限定用户ID，增强诊断能力
+    const rec = await env.DB.prepare('SELECT id, user_id, used FROM recovery_codes WHERE code_hash = ?').bind(hash).first()
+    
+    // 增加详细的错误信息用于诊断
+    if (!rec) {
+      return addCors(new Response(JSON.stringify({ 
+        error: 'Invalid code',
+        debug: {
+          receivedCode: cleanRecoveryCode,
+          userIdFromToken: decoded.userId,
+          userFound: !!user,
+          userTwoFactorEnabled: user?.two_factor_enabled
+        }
+      }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    }
+    
+    // 检查是否属于正确的用户
+    if (rec.user_id !== user.id) {
+      return addCors(new Response(JSON.stringify({ 
+        error: 'Code belongs to another user',
+        debug: {
+          codeUserId: rec.user_id,
+          tokenUserId: user.id
+        }
+      }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    }
+    
+    // 检查是否已被使用
+    if (rec.used) {
+      return addCors(new Response(JSON.stringify({ error: 'Code already used' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    }
+    
     await env.DB.prepare('UPDATE recovery_codes SET used = 1 WHERE id = ?').bind(rec.id).run()
     const fullToken = await generateToken(user.id, env)
     return addCors(new Response(JSON.stringify({ user: { id: user.id, email: user.email, is_admin: user.is_admin || 0 }, token: fullToken }), { status: 200, headers: { 'Content-Type': 'application/json' } }), request, null, env)
