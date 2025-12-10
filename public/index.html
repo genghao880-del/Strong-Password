@@ -791,6 +791,10 @@
                                         const unusedCodes = codesData.codes.filter(code => !code.used);
                                         if (unusedCodes.length <= 2) { // 如果剩余2个或更少未使用恢复码
                                             await this.generateRecoveryCodes();
+                                            // 明确显示恢复码模态框
+                                            setTimeout(() => {
+                                                this.showRecoveryCodesModal();
+                                            }, 100);
                                             this.showToast('检测到恢复码即将用完，已为您生成新的恢复码，请及时保存', 'info');
                                         }
                                     }
