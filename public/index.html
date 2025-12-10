@@ -789,6 +789,45 @@
                 }
             }
 
+            // 添加disable2FA函数实现
+            async disable2FA() {
+                if (!this.state.twoFACode) { 
+                    this.showToast('请输入验证码','error'); 
+                    return; 
+                }
+                
+                try {
+                    const res = await fetch(`${API_BASE}/api/auth/2fa/disable`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${this.state.token}`
+                        },
+                        body: JSON.stringify({ code: this.state.twoFACode })
+                    });
+                    
+                    const data = await res.json();
+                    
+                    if (res.ok && data.success) {
+                        // 更新用户状态
+                        this.state.user.two_factor_enabled = 0;
+                        this.state.twoFAEnabled = false;
+                        // 关闭模态框
+                        this.state.show2FAModal = false;
+                        this.state.twoFAStage = 'idle';
+                        this.state.twoFACode = '';
+                        // 更新本地存储
+                        localStorage.setItem('user', JSON.stringify(this.state.user));
+                        this.showToast('二次验证已关闭 🔓','success');
+                        this.render();
+                    } else {
+                        this.showToast('关闭失败: ' + (data.error || '未知错误'),'error');
+                    }
+                } catch (e) {
+                    this.showToast('关闭失败: ' + e.message,'error');
+                }
+            }
+
             exportPasswords() {
                 const enriched = this.state.allPasswords.map(p => ({
                     id: p.id,
