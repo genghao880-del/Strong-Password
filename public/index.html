@@ -769,6 +769,37 @@
                         this.state.show2FAModal = false;
                         await this.loadPasswords();
                         this.showToast('恢复码验证成功 ✅','success');
+                        
+                        // 检查是否需要生成新的恢复码（使用了最后一个恢复码）
+                        try {
+                            // 获取用户信息，检查剩余恢复码数量
+                            const userRes = await fetch(`${API_BASE}/api/auth/me`, {
+                                headers: { 'Authorization': `Bearer ${this.state.token}` }
+                            });
+                            
+                            if (userRes.ok) {
+                                const userData = await userRes.json();
+                                // 如果启用了2FA，检查剩余恢复码
+                                if (userData.two_factor_enabled) {
+                                    const codesRes = await fetch(`${API_BASE}/api/auth/2fa/recovery/codes`, {
+                                        headers: { 'Authorization': `Bearer ${this.state.token}` }
+                                    });
+                                    
+                                    if (codesRes.ok) {
+                                        const codesData = await codesRes.json();
+                                        // 如果剩余未使用的恢复码很少或为0，自动生成新的
+                                        const unusedCodes = codesData.codes.filter(code => !code.used);
+                                        if (unusedCodes.length <= 2) { // 如果剩余2个或更少未使用恢复码
+                                            await this.generateRecoveryCodes();
+                                            this.showToast('检测到恢复码即将用完，已为您生成新的恢复码，请及时保存', 'info');
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            console.error('检查恢复码状态失败:', e);
+                        }
+                        
                         this.render();
                     } else {
                         // 提供更详细的错误信息
@@ -827,23 +858,6 @@
                     this.showToast('关闭失败: ' + e.message,'error');
                 }
             }
-
-            exportPasswords() {
-                const enriched = this.state.allPasswords.map(p => ({
-                    id: p.id,
-                    website: p.website,
-                    username: p.username || '',
-                    password: p.password,
-                    created_at: p.created_at
-                }));
-                const data = JSON.stringify(enriched, null, 2);
-                const blob = new Blob([data], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `passwords-backup-${new Date().toISOString().split('T')[0]}.json`;
-                a.click();
-                URL.revokeObjectURL(url);
                 this.showToast('已导出 📦', 'success');
             }
 
@@ -1226,8 +1240,8 @@
                                                     </div>`;
                                         } else if (this.state.twoFAStage === 'disable') {
                                                 bodyHTML = `
-                                                    <p class='text-sm text-gray-300 mb-3'>输入当前验证码以关闭二次验证。</p>
-                                                    <input type='text' placeholder='6位验证码' class='w-full bg-slate-700 text-white p-2 rounded mb-3 text-center tracking-widest' oninput='manager.state.twoFACode = this.value' />
+                                                    <p class='text-sm text-gray-300 mb-3'>要关闭二次验证，请在您的身份验证应用（如Google Authenticator）中查看当前的6位动态验证码，并输入到下方：</p>
+                                                    <input type='text' placeholder='6位动态验证码' class='w-full bg-slate-700 text-white p-2 rounded mb-3 text-center tracking-widest' oninput='manager.state.twoFACode = this.value' />
                                                     <div class='flex gap-2'>
                                                         <button onclick='manager.disable2FA()' class='flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded'>关闭</button>
                                                         <button onclick='manager.close2FAModal()' class='flex-1 bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 rounded'>取消</button>
