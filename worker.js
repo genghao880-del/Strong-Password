@@ -782,9 +782,40 @@ router.post('/api/auth/2fa/recovery/verify', async (request, env) => {
   try {
     await ensureMigration(env)
     const { tempToken, recoveryCode } = await request.json()
-    if (!tempToken || !recoveryCode) return addCors(newResponse(JSON.stringify({ error: 'tempToken and recoveryCode required' }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request, null, env)
-    const decoded = decodeToken(tempToken)
-    if (!decoded || decoded.twofa !== 'pending') return addCors(new Response(JSON.stringify({ error: 'Invalid token' }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    if (!tempToken || !recoveryCode) return addCors(new Response(JSON.stringify({ error: 'tempToken and recoveryCode required' }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    
+    // 增强临时令牌验证，提供更详细的错误信息
+    const decoded = await decodeToken(tempToken, env)
+    if (!tempToken) {
+      return addCors(new Response(JSON.stringify({ 
+        error: 'Missing or malformed tempToken',
+        debug: { tempTokenProvided: !!tempToken }
+      }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    }
+    
+    if (!decoded) {
+      return addCors(new Response(JSON.stringify({ 
+        error: 'Invalid or expired token',
+        debug: { 
+          tokenFormatValid: tempToken && tempToken.split('.').length === 3,
+          decodedResult: decoded
+        }
+      }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    }
+    
+    if (decoded.twofa !== 'pending') {
+      return addCors(new Response(JSON.stringify({ 
+        error: 'Invalid token',
+        debug: { 
+          expected: 'pending',
+          received: decoded.twofa,
+          userId: decoded.userId,
+          exp: decoded.exp,
+          currentTime: Math.floor(Date.now() / 1000)
+        }
+      }), { status: 401, headers: { 'Content-Type': 'application/json' } }), request, null, env)
+    }
+    
     const user = await env.DB.prepare('SELECT id, email, two_factor_enabled, is_admin FROM users WHERE id = ?').bind(decoded.userId).first()
     if (!user || !user.two_factor_enabled) return addCors(new Response(JSON.stringify({ error: '2FA not enabled' }), { status: 400, headers: { 'Content-Type': 'application/json' } }), request, null, env)
     
