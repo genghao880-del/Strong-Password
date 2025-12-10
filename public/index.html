@@ -741,8 +741,17 @@
 
             async verifyRecoveryCode() {
                 if (!this.state.twoFATempToken || !this.state.twoFACode) { this.showToast('请输入恢复码','error'); return; }
+                // 确保恢复码转换为大写形式再发送到服务器
+                const recoveryCode = this.state.twoFACode.toUpperCase();
                 try {
-                    const res = await fetch(`${API_BASE}/api/auth/2fa/recovery/verify`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ tempToken: this.state.twoFATempToken, recoveryCode: this.state.twoFACode }) })
+                    const res = await fetch(`${API_BASE}/api/auth/2fa/recovery/verify`, { 
+                        method:'POST', 
+                        headers:{'Content-Type':'application/json'}, 
+                        body: JSON.stringify({ 
+                            tempToken: this.state.twoFATempToken, 
+                            recoveryCode: recoveryCode
+                        }) 
+                    })
                     const data = await res.json();
                     if (res.ok && data.token) {
                         this.state.token = data.token;
