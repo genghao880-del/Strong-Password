@@ -672,12 +672,71 @@
                         this.state.recoveryCodes = data.codes;
                         this.showToast('恢复码已生成','success');
                         this.render();
+                        // 添加提示用户保存恢复码的对话框
+                        this.showRecoveryCodesModal();
                     } else {
                         this.showToast('生成失败: '+(data.error||'错误'),'error');
                     }
                 } catch(e){
                     this.showToast('生成失败: '+e.message,'error');
                 }
+            }
+
+            showRecoveryCodesModal() {
+                // 创建一个模态框显示恢复码并提示用户保存
+                const modal = document.createElement('div');
+                modal.className = 'fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50';
+                modal.innerHTML = `
+                    <div class='bg-[#0F1E2E] border border-[#F48120] rounded-xl p-6 w-[90%] max-w-md shadow-2xl animate-slideIn'>
+                        <h3 class='text-xl font-bold text-white mb-4'>重要：请保存您的恢复码</h3>
+                        <p class='text-sm text-gray-300 mb-4'>
+                            这些恢复码是您在无法访问二次验证设备时的唯一凭证，请妥善保管。
+                        </p>
+                        <div class='bg-slate-800 rounded-lg p-4 mb-4'>
+                            <ul class='grid grid-cols-2 gap-2'>
+                                ${this.state.recoveryCodes.map(code => `<li class='text-center py-2 px-3 bg-slate-700 rounded font-mono text-white'>${code}</li>`).join('')}
+                            </ul>
+                        </div>
+                        <p class='text-yellow-400 text-sm mb-4'>
+                            ⚠️ 注意：这些恢复码只显示一次，请立即保存！一旦关闭此窗口将无法再次查看。
+                        </p>
+                        <div class='flex gap-2'>
+                            <button onclick='manager.copyRecoveryCodes()' class='flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded'>
+                                复制全部
+                            </button>
+                            <button onclick='manager.downloadRecoveryCodes()' class='flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded'>
+                                下载 TXT
+                            </button>
+                            <button onclick='this.closest(".fixed").remove()' class='flex-1 bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 rounded'>
+                                关闭
+                            </button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+            }
+
+            copyRecoveryCodes() {
+                const codesText = this.state.recoveryCodes.join('\n');
+                navigator.clipboard.writeText(codesText).then(() => {
+                    this.showToast('恢复码已复制到剪贴板', 'success');
+                }).catch(err => {
+                    this.showToast('复制失败: ' + err, 'error');
+                });
+            }
+
+            downloadRecoveryCodes() {
+                const codesText = `PassFortress 恢复码\n\n请妥善保管这些恢复码，它们是您在无法访问二次验证设备时的唯一凭证。\n\n${this.state.recoveryCodes.join('\n')}\n\n生成时间: ${new Date().toLocaleString()}`;
+                const blob = new Blob([codesText], { type: 'text/plain;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `passfortress-recovery-codes-${new Date().toISOString().slice(0, 10)}.txt`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                this.showToast('恢复码文件已下载', 'success');
             }
 
             async verifyRecoveryCode() {
