@@ -758,8 +758,14 @@ router.post('/api/auth/2fa/recovery/generate', async (request, env) => {
     // Invalidate old unused codes
     await env.DB.prepare('DELETE FROM recovery_codes WHERE user_id = ? AND used = 0').bind(userId).run()
     const codes = []
+    // 使用更可靠的字符集，避免容易混淆的字符如0/O和1/I/l
+    const chars = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
     for (let i = 0; i < 10; i++) {
-      const raw = [...crypto.getRandomValues(new Uint8Array(6))].map(b => (b % 36).toString(36)).join('').toUpperCase()
+      let raw = '';
+      const randomArray = crypto.getRandomValues(new Uint8Array(6));
+      for (let j = 0; j < 6; j++) {
+        raw += chars.charAt(randomArray[j] % chars.length);
+      }
       const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw))
       const hash = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2,'0')).join('')
       await env.DB.prepare('INSERT INTO recovery_codes (user_id, code_hash) VALUES (?, ?)').bind(userId, hash).run()
