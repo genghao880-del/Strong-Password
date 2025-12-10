@@ -257,6 +257,9 @@
                     this.state.token = savedToken;
                     this.state.user = JSON.parse(savedUser);
                     this.state.screen = 'app';
+                    // 确保在初始化时关闭所有模态框
+                    this.state.show2FAModal = false;
+                    this.state.twoFAStage = 'idle';
                     await this.loadPasswords();
                     this.render();
                 } else {
@@ -762,6 +765,8 @@
                         this.state.twoFAStage = 'idle';
                         this.state.twoFATempToken = '';
                         this.state.twoFACode = '';
+                        // 确保关闭2FA模态框
+                        this.state.show2FAModal = false;
                         await this.loadPasswords();
                         this.showToast('恢复码验证成功 ✅','success');
                         this.render();
