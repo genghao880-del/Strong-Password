@@ -1746,7 +1746,10 @@
                     } else {
                         // 处理"Already enabled"和其他错误
                         if (data.error === 'Already enabled') {
-                            this.showToast('二次验证已经启用，如需重新设置请先关闭', 'error');
+                            // 如果已经启用，直接进入关闭流程
+                            this.state.twoFAStage = 'disable';
+                            this.state.show2FAModal = true;
+                            this.render();
                         } else {
                             this.showToast(data.error || '初始化失败','error');
                         }
