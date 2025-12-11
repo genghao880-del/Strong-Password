@@ -1136,11 +1136,6 @@ export default {
       return applySecurityHeaders(new Response('Service temporarily unavailable', { status: 503 }), request, null, env);
     }
     
-    // Handle favicon.ico - return empty 204 to avoid 500 error
-    if (url.pathname === '/favicon.ico') {
-      return new Response(null, { status: 204 });
-    }
-    
     // Try to serve other static assets
     if (env.ASSETS) {
       try {
