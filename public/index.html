@@ -873,8 +873,35 @@
             }
             */
 
+            /**
+             * Export all passwords to a JSON file and trigger download in browser.
+             * Format: JSON array of objects containing { id, website, username, password, created_at }.
+             */
             exportPasswords() {
-                this.showToast('已导出 📦', 'success');
+                try {
+                    if (!Array.isArray(this.state.allPasswords)) throw new Error('密码未加载');
+                    const subset = this.state.allPasswords.map(p => ({
+                        id: p.id,
+                        website: p.website,
+                        username: p.username || '',
+                        password: p.password,
+                        created_at: p.created_at
+                    }));
+                    const data = JSON.stringify(subset, null, 2);
+                    const blob = new Blob([data], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `passwords-${new Date().toISOString().split('T')[0]}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    this.showToast(`已导出 ${subset.length} 条密码 📦`, 'success');
+                } catch (e) {
+                    console.error('导出失败', e);
+                    this.showToast('导出失败: ' + (e.message || '未知错误'), 'error');
+                }
             }
 
             importPasswords() {
