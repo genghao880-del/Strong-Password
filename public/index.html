@@ -872,7 +872,39 @@
             */
 
             exportPasswords() {
-                this.showToast('已导出 📦', 'success');
+                // 确保有可导出的密码
+                if (!this.state.allPasswords || this.state.allPasswords.length === 0) {
+                    this.showToast('没有可导出的密码', 'error');
+                    return;
+                }
+
+                // 提示用户导出将包含明文密码
+                if (!confirm('导出将以明文包含所有密码，可能存在安全风险。确认继续导出吗？')) return;
+
+                try {
+                    const subset = this.state.allPasswords.map(p => ({
+                        id: p.id,
+                        website: p.website,
+                        username: p.username || '',
+                        password: p.password,
+                        tags: p.tags || [],
+                        created_at: p.created_at
+                    }));
+                    const data = JSON.stringify(subset, null, 2);
+                    const blob = new Blob([data], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `passwords-all-${new Date().toISOString().split('T')[0]}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    this.showToast('已导出 📦', 'success');
+                } catch (e) {
+                    console.error('Export failed:', e);
+                    this.showToast('导出失败: ' + e.message, 'error');
+                }
             }
 
             importPasswords() {
